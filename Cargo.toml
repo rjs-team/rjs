@@ -1,0 +1,11 @@
+[package]
+name = "rjs"
+version = "0.1.0"
+authors = ["Matt Peterson <mattpeterson@google.com>"]
+
+[features]
+libc = []
+debugmozjs = ['js/debugmozjs']
+
+[dependencies]
+js = {git = "https://github.com/servo/rust-mozjs", features = ["promises"]}
