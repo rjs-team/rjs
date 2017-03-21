@@ -14,6 +14,8 @@ use js::jsapi::JSAutoCompartment;
 use js::jsapi::JSContext;
 use js::jsapi::JS_DefineFunction;
 use js::jsapi::JS_EncodeStringToUTF8;
+use js::jsapi::JS_free;
+use js::jsapi::JS_GetRuntime;
 use js::jsapi::JS_GetRuntimePrivate;
 use js::jsapi::JS_Init;
 use js::jsapi::JS_InitStandardClasses;
@@ -77,30 +79,32 @@ fn main() {
 		assert!(rt.evaluate_script(global, &contents,
 								   &filename, 1, rval.handle_mut()).is_ok());
 
-		let js = js::rust::ToString(cx, rval.handle());
-		rooted!(in(cx) let message_root = js);
-		let message = JS_EncodeStringToUTF8(cx, message_root.handle());
-		let message = CStr::from_ptr(message);
+		rooted!(in(cx) let message_root = js::rust::ToString(cx, rval.handle()));
+		let message_ptr = JS_EncodeStringToUTF8(cx, message_root.handle());
+		let message = CStr::from_ptr(message_ptr);
 		println!("script result: {}", str::from_utf8(message.to_bytes()).unwrap());
+		JS_free(cx, message_ptr as *mut c_void);
 
 	}
-
 }
 
-unsafe extern "C" fn puts(context: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
+unsafe extern "C" fn puts(cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
 	let args = CallArgs::from_vp(vp, argc);
 
 	if args._base.argc_ != 1 {
-		JS_ReportError(context, b"puts() requires exactly 1 argument\0".as_ptr() as *const libc::c_char);
+		JS_ReportError(cx, b"puts() requires exactly 1 argument\0".as_ptr() as *const libc::c_char);
 		return false;
 	}
 
+	let rt = JS_GetRuntime(cx);
+	let rcx = JS_GetRuntimePrivate(rt) as *mut RJSContext;
+
 	let arg = args.get(0);
-	let js = js::rust::ToString(context, arg);
-	rooted!(in(context) let message_root = js);
-	let message = JS_EncodeStringToUTF8(context, message_root.handle());
-	let message = CStr::from_ptr(message);
+	rooted!(in(cx) let message_root = js::rust::ToString(cx, arg));
+	let message_ptr = JS_EncodeStringToUTF8(cx, message_root.handle());
+	let message = CStr::from_ptr(message_ptr);
 	println!("{}", str::from_utf8(message.to_bytes()).unwrap());
+	JS_free(cx, message_ptr as *mut c_void);
 
 	args.rval().set(UndefinedValue());
 	return true;
