@@ -9,3 +9,6 @@ debugmozjs = ['js/debugmozjs']
 
 [dependencies]
 js = {git = "https://github.com/servo/rust-mozjs", features = ["promises"]}
+tokio-core = "0.1.6"
+tokio-timer = "0.1.1"
+futures = "0.1"
