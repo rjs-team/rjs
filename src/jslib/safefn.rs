@@ -14,32 +14,32 @@
 use libc;
 
 // use std::os::raw::c_void;
-// use js::jsapi::CallArgs;
-// use js::jsapi::CompartmentOptions;
-// use js::jsapi::Heap;
-// use js::jsapi::JSClass;
-// use js::jsapi::JSFunctionSpec;
-// use js::jsapi::JSAutoCompartment;
-use js::jsapi::JSContext;
-use js::jsapi::JSFunction;
-// use js::jsapi::JS_CallFunctionValue;
-use js::jsapi::JS_DefineFunction;
-// use js::jsapi::JS_EncodeStringToUTF8;
-// use js::jsapi::JS_free;
-// use js::jsapi::JS_GetRuntime;
-// use js::jsapi::JS_GetRuntimePrivate;
-// use js::jsapi::JS_Init;
-// use js::jsapi::JS_InitStandardClasses;
-// use js::jsapi::JS_NewGlobalObject;
-// use js::jsapi::JS_ReportError;
-// // use js::jsapi::JS_SetGCZeal; // seems to be missing
-// use js::jsapi::JS_SetRuntimePrivate;
-// use js::jsapi::OnNewGlobalHookOption;
-use js::jsapi::Value;
-// use js::jsval::{NullValue, UndefinedValue};
-use js::jsapi::{ HandleObject};
-// use js::jsapi::{JS_InitClass, JSCLASS_HAS_PRIVATE};
-// use js::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
+// use mozjs::jsapi::CallArgs;
+// use mozjs::jsapi::CompartmentOptions;
+// use mozjs::jsapi::Heap;
+// use mozjs::jsapi::JSClass;
+// use mozjs::jsapi::JSFunctionSpec;
+// use mozjs::jsapi::JSAutoCompartment;
+use mozjs::jsapi::JSContext;
+use mozjs::jsapi::JSFunction;
+// use mozjs::jsapi::JS_CallFunctionValue;
+use mozjs::jsapi::JS_DefineFunction;
+// use mozjs::jsapi::JS_EncodeStringToUTF8;
+// use mozjs::jsapi::JS_free;
+// use mozjs::jsapi::JS_GetRuntime;
+// use mozjs::jsapi::JS_GetRuntimePrivate;
+// use mozjs::jsapi::JS_Init;
+// use mozjs::jsapi::JS_InitStandardClasses;
+// use mozjs::jsapi::JS_NewGlobalObject;
+// use mozjs::jsapi::JS_ReportError;
+// // use mozjs::jsapi::JS_SetGCZeal; // seems to be missing
+// use mozjs::jsapi::JS_SetRuntimePrivate;
+// use mozjs::jsapi::OnNewGlobalHookOption;
+use mozjs::jsapi::Value;
+// use mozjs::jsval::{NullValue, UndefinedValue};
+use mozjs::jsapi::{ HandleObject};
+// use mozjs::jsapi::{JS_InitClass, JSCLASS_HAS_PRIVATE};
+// use mozjs::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
 
 // use std::ptr;
 // use std::env;

@@ -4,7 +4,7 @@
 // #![cfg(feature = "debugmozjs")]
 
 #[macro_use]
-extern crate js;
+extern crate mozjs;
 extern crate libc;
 extern crate tokio_core;
 // extern crate tokio_timer;

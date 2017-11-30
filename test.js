@@ -9,4 +9,10 @@ setTimeout(function() { puts("4"); }, 1000);
 puts(getFileSync("test.js"));
 puts(readDir("."));
 
+try {
+	puts(1, 2);
+} catch (e) {
+	puts('Caught error: '+e);
+}
+
 1 + 2 + Object
