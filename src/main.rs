@@ -1,6 +1,7 @@
 
 #![feature(const_fn)]
 #![feature(libc)]
+#![feature(trace_macros)]
 // #![cfg(feature = "debugmozjs")]
 
 #[macro_use]
@@ -9,7 +10,11 @@ extern crate libc;
 extern crate tokio_core;
 // extern crate tokio_timer;
 extern crate futures;
+#[macro_use]
 extern crate rjs;
+#[macro_use]
+extern crate lazy_static;
+
 
 
 use tokio_core::reactor::{Core, Handle, Timeout};
@@ -49,6 +54,13 @@ use jsapi::{HandleObject};
 use mozjs::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
 use mozjs::conversions::{FromJSValConvertible, ToJSValConvertible};
 use mozjs::conversions::ConversionResult;
+//use rjs::jslib::jsclass;
+use rjs::jslib::jsclass::{JSClassInitializer, null_function, null_property, null_wrapper, jsclass_has_reserved_slots};
+use mozjs::jsapi::JSClass;
+use mozjs::jsapi::JSClassOps;
+use mozjs::jsapi::JSFunctionSpec;
+use mozjs::jsapi::JSNativeWrapper;
+use mozjs::jsapi::JSPropertySpec;
 
 use std::ptr;
 use std::env;
@@ -68,51 +80,7 @@ use std::fmt::Display;
 
 use rjs::jslib::safefn::myDefineFunction;
 
-macro_rules! js_fn {
-    ($name:ident |$($param:ident : $type:ty),*| -> Result<JSVal, Option<String>> $body:tt) => (
-    	#[allow(non_snake_case)] 
-    	unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
-			let args = CallArgs::from_vp(vp, argc);
-			let rt = JS_GetRuntime(cx);
-			let rcx = JS_GetRuntimePrivate(rt) as *mut RJSContext;
-            assert!((*rcx).cx == cx);
 
-			let result = (|$($param : $type),*| -> Result<JSVal, Option<String>> $body) (cx, &*rcx, args);
-            match result {
-                Ok(v) => {
-                    args.rval().set(v);
-                    true
-                },
-                Err(Some(s)) => {
-                    let cstr = CString::new(s).unwrap();
-		            JS_ReportError(cx, cstr.as_ptr() as *const libc::c_char);
-                    false
-                },
-                Err(None) => {
-                    false
-                },
-            }
-
-    	}
-    )
-}
-
-
-macro_rules! js_callback {
-    ($rcx:ident, move |$($param:ident : $type:ty),*| $body:tt) => (
-    	(move |tx: Arc<oneshot::Sender<()>>| {
-    		move |$($param : $type),*| {
-				let _ac = JSAutoCompartment::new($rcx.cx, $rcx.global.get());
-
-				let ret = (|$($param : $type),*| $body) ($($param),*);
-
-				drop(tx);
-
-				ret
-			}
-		})($rcx.tx.upgrade().unwrap())
-    )
-}
 
 
 fn main() {
@@ -143,7 +111,8 @@ fn main() {
 
     let mut core = Core::new().unwrap();
 
-    let (tx, rx) = oneshot::channel::<()>();
+    // this is used to keep track of all pending daemons and callbacks, when there are no more handles to tx, rx will join and the main thread will exit
+    let (tx, rx) = oneshot::channel::<()>(); 
     let tx = Arc::new(tx);
 
     let rcx = Box::into_raw(Box::new(RJSContext {
@@ -159,7 +128,7 @@ fn main() {
     // (*rcx).handle.spawn_fn(|| -> Result<(), ()> {
     // });
 
-    let res = core.run(future::ok(()).then(|_: Result<(), ()>| {
+    core.run(future::ok(()).then(|_: Result<(), ()>| {
 
 
         // let res = JS_InitStandardClasses(cx, global);
@@ -190,12 +159,7 @@ fn main() {
         }
 
         Ok(())
-    })));
-
-    match res {
-        Ok(a) => println!("done: {:?}", a),
-        Err(e) => println!("cancelled: {:?}", e),
-    }
+    }))).unwrap();
 }
 
 struct JSString<'a> {
@@ -241,51 +205,22 @@ impl<T> ToResult<T> for Result<mozjs::conversions::ConversionResult<T>, ()> {
 }
 
 
-js_fn!{puts |cx: *mut JSContext, _rcx: &'static RJSContext, args: CallArgs| -> Result<JSVal, Option<String>> {
-	if args._base.argc_ != 1 {
-		return Err(Some("puts() requires exactly 1 argument".into()));
-	}
-
-	// let arg = args.get(0);
-	// let arg = String::from_jsval(cx, arg, ()).unwrap();
-	// let arg = arg.get_success_value().unwrap();
-
-	let arg = String::from_jsval(cx, args.get(0), ()).to_result().unwrap_or_else(|err| String::from(err.unwrap_or("".into())));
-    //let arg = str_from_js(cx, args.get(0));
+js_fn!{fn puts(_rcx: &'static RJSContext, arg: String) -> Result<JSVal, Option<String>> {
 	println!("{}", arg);
-
-	// rooted!(in(cx) let message_root = mozjs::rust::ToString(cx, arg));
-	// let message_ptr = JS_EncodeStringToUTF8(cx, message_root.handle());
-	// let message = CStr::from_ptr(message_ptr);
-	// println!("{}", str::from_utf8(message.to_bytes()).unwrap());
-	// JS_free(cx, message_ptr as *mut c_void);
-
-	//args.rval().set(UndefinedValue());
-	//return true;
     Ok(UndefinedValue())
 }}
 
 
-js_fn!{setTimeout |cx: *mut JSContext, rcx: &'static RJSContext, args: CallArgs| -> Result<JSVal, Option<String>> {
-	if args._base.argc_ != 2 {
-		return Err(Some("setTimeout() requires exactly 2 arguments".into()));
-	}
-
-	let callback = args.get(0);
-	let timeout = args.get(1);
-
-	let callback = Heap::new(callback.get());
-	let timeout = mozjs::rust::ToUint64(cx, timeout).unwrap();
-	
+js_fn!{fn setTimeout(rcx: &'static RJSContext, callback: Heap<JSVal>, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> Result<JSVal, Option<String>> {
 	let timeout = Timeout::new(Duration::from_millis(timeout), &rcx.handle).unwrap();
 
 	rcx.handle.spawn(
 		timeout.map_err(|_|()).and_then(js_callback!(rcx, move|_a:()| {
-			rooted!(in(cx) let this_val = (*rcx).global.get());
-			rooted!(in(cx) let mut rval = UndefinedValue());
+			rooted!(in(rcx.cx) let this_val = (*rcx).global.get());
+			rooted!(in(rcx.cx) let mut rval = UndefinedValue());
 
 			let ok = JS_CallFunctionValue(
-				cx, 
+				rcx.cx, 
 				this_val.handle(),
 				callback.handle(),
 				&jsapi::HandleValueArray {
@@ -296,7 +231,7 @@ js_fn!{setTimeout |cx: *mut JSContext, rcx: &'static RJSContext, args: CallArgs|
 
 			if !ok {
 				println!("error!");
-				report_pending_exception(cx);
+				report_pending_exception(rcx.cx);
 			}
 				
 			
@@ -309,19 +244,13 @@ js_fn!{setTimeout |cx: *mut JSContext, rcx: &'static RJSContext, args: CallArgs|
     Ok(UndefinedValue())
 }}
 
-js_fn!{getFileSync |cx: *mut JSContext, _rcx: &'static RJSContext, args: CallArgs| -> Result<JSVal, Option<String>> {
-	if args._base.argc_ != 1 {
-		return Err(Some("getFileSync() requires exactly 1 arguments".into()));
-	}
-
-	let path = String::from_jsval(cx, args.get(0), ()).to_result()?;
-
+js_fn!{fn getFileSync(rcx: &'static RJSContext, path: String) -> Result<JSVal, Option<String>> {
 	if let Ok(mut file) = File::open(path) {
 		let mut contents = String::new();
 		file.read_to_string(&mut contents).unwrap();
 
-        rooted!{in(cx) let mut ret = UndefinedValue()};
-		contents.to_jsval(cx, ret.handle_mut());
+        rooted!{in(rcx.cx) let mut ret = UndefinedValue()};
+		contents.to_jsval(rcx.cx, ret.handle_mut());
         Ok(*ret)
 	} else {
 		//args.rval().set(UndefinedValue());
@@ -331,28 +260,19 @@ js_fn!{getFileSync |cx: *mut JSContext, _rcx: &'static RJSContext, args: CallArg
 	//true
 }}
 
-js_fn!{readDir |cx: *mut JSContext, _rcx: &'static RJSContext, args: CallArgs| -> Result<JSVal, Option<String>> {
-	if args._base.argc_ != 1 {
-		return Err(Some("readDir() requires exactly 1 arguments".into()));
-	}
+js_fn!{fn readDir(rcx: &'static RJSContext, path: String) -> Result<JSVal, Option<String>> {
+	rooted!(in(rcx.cx) let arr = JS_NewArrayObject1(rcx.cx, 0));
+	rooted!(in(rcx.cx) let mut temp = UndefinedValue());
 
-	rooted!(in(cx) let arr = JS_NewArrayObject1(cx, 0));
-
-	let path = args.get(0);
-	let path = String::from_jsval(cx, path, ()).unwrap();
-	let path = path.get_success_value().unwrap();
-
-	rooted!(in(cx) let mut temp = UndefinedValue());
-
-	for (i, entry) in fs::read_dir(Path::new(path)).unwrap().enumerate() {
+	for (i, entry) in fs::read_dir(Path::new(&path)).unwrap().enumerate() {
         let entry = entry.unwrap();
         let path = entry.path();
 
-        path.to_str().unwrap().to_jsval(cx, temp.handle_mut());
-        JS_SetElement(cx, arr.handle(), i as u32, temp.handle());
+        path.to_str().unwrap().to_jsval(rcx.cx, temp.handle_mut());
+        JS_SetElement(rcx.cx, arr.handle(), i as u32, temp.handle());
     }
 
-    arr.to_jsval(cx, args.rval());
+    //arr.to_jsval(rcx.cx, args.rval());
 	// args.rval().set(arr.get());
 	Ok(ObjectValue(*arr))
 }}
@@ -362,8 +282,7 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
 	if !jsapi::JS_GetPendingException(cx, ex.handle_mut())
 		{ return; }
 
-	let ex = String::from_jsval(cx, ex.handle(), ()).unwrap();
-	let ex = ex.get_success_value().unwrap();
+	let ex = String::from_jsval(cx, ex.handle(), ()).to_result().unwrap();
 	println!("Exception!: {}", ex);
 
 	// rooted!(in(cx) let message_root = mozjs::rust::ToString(cx, ex.handle()));
@@ -386,4 +305,18 @@ impl RJSContext {
 	// fn enter_js(f: fn() -> bool) {
 
 	// }
+}
+
+
+struct Test {
+
+}
+
+js_class!{ Test
+
+    fn puts(rcx: &'static RJSContext, arg: String) -> Result<JSVal, Option<String>> {
+        println!("{}", arg);
+        Ok(UndefinedValue())
+    }
+
 }
