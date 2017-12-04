@@ -1,22 +1,28 @@
+use mozjs::conversions::ToJSValConvertible;
+
+pub type JSRet<T: ToJSValConvertible> = Result<T, Option<String>>;
+
 #[macro_export]
 macro_rules! js_fn_raw {
-    ($name:ident |$($param:ident : $type:ty),*| -> Result<JSVal, Option<String>> $body:tt) => (
-    	#[allow(non_snake_case)] 
-    	unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
-			let args = CallArgs::from_vp(vp, argc);
-			let rt = JS_GetRuntime(cx);
-			let rcx = JS_GetRuntimePrivate(rt) as *mut RJSContext;
+    (fn $name:ident($($param:ident : $type:ty),*) -> JSRet<$ret:ty> $body:tt) => (
+        #[allow(non_snake_case)] 
+        unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
+            let args = CallArgs::from_vp(vp, argc);
+            let rt = JS_GetRuntime(cx);
+            let rcx = JS_GetRuntimePrivate(rt) as *mut RJSContext;
             assert!((*rcx).cx == cx);
 
-			let result = (|$($param : $type),*| -> Result<JSVal, Option<String>> $body) (cx, &*rcx, args);
+            fn rustImpl($($param : $type),*) -> JSRet<$ret> $body
+
+            let result = rustImpl(cx, &*rcx, args);
             match result {
                 Ok(v) => {
-                    args.rval().set(v);
+                    v.to_jsval(cx, args.rval());
                     true
                 },
                 Err(Some(s)) => {
                     let cstr = CString::new(s).unwrap();
-		            JS_ReportError(cx, cstr.as_ptr() as *const libc::c_char);
+                    JS_ReportError(cx, cstr.as_ptr() as *const libc::c_char);
                     false
                 },
                 Err(None) => {
@@ -24,14 +30,14 @@ macro_rules! js_fn_raw {
                 },
             }
 
-    	}
+        }
     )
 }
 
 #[macro_export]
 macro_rules! js_fn {
-    (fn $name:ident ($rcx:ident : &'static RJSContext $($args:tt)*) -> Result<JSVal, Option<String>> $body:tt) => {
-        js_fn_raw!{$name |cx: *mut JSContext, $rcx: &'static RJSContext, args: CallArgs| -> Result<JSVal, Option<String>> {
+    (fn $name:ident ($rcx:ident : &'static RJSContext $($args:tt)*) -> JSRet<$ret:ty> $body:tt) => {
+        js_fn_raw!{fn $name (cx: *mut JSContext, $rcx: &'static RJSContext, args: CallArgs) -> JSRet<$ret> {
             js_unpack_args!({stringify!($name), cx, args} ($($args)*));
 
             $body
@@ -46,17 +52,17 @@ macro_rules! js_fn {
 #[macro_export]
 macro_rules! js_callback {
     ($rcx:ident, move |$($param:ident : $type:ty),*| $body:tt) => (
-    	(move |tx: Arc<oneshot::Sender<()>>| {
-    		move |$($param : $type),*| {
-				let _ac = JSAutoCompartment::new($rcx.cx, $rcx.global.get());
+        (move |tx: Arc<oneshot::Sender<()>>| {
+            move |$($param : $type),*| {
+                let _ac = JSAutoCompartment::new($rcx.cx, $rcx.global.get());
 
-				let ret = (|$($param : $type),*| $body) ($($param),*);
+                let ret = (|$($param : $type),*| $body) ($($param),*);
 
-				drop(tx); // this drops the handle that keeps the main thread alive
+                drop(tx); // this drops the handle that keeps the main thread alive
 
-				ret
-			}
-		})($rcx.tx.upgrade().unwrap()) // this passes a handle to keep the main thread alive
+                ret
+            }
+        })($rcx.tx.upgrade().unwrap()) // this passes a handle to keep the main thread alive
     )
 }
 
@@ -100,12 +106,12 @@ macro_rules! _js_unpack_args_unwrap_args {
     };
     // options
     (($cx:expr, $callargs:expr, $n:expr) $name:ident : $type:ty {$opt:expr}, $($args:tt)*) => {
-        let $name = <$type>::from_jsval($cx, $callargs.get($n), $opt).to_result()?;
+        let $name = unsafe { <$type>::from_jsval($cx, $callargs.get($n), $opt).to_result()? };
         _js_unpack_args_unwrap_args!(($cx, $callargs, $n+1) $($args)*);
     };
     // no options
     (($cx:expr, $callargs:expr, $n:expr) $name:ident : $type:ty, $($args:tt)*) => {
-        let $name = <$type>::from_jsval($cx, $callargs.get($n), ()).to_result()?;
+        let $name = unsafe { <$type>::from_jsval($cx, $callargs.get($n), ()).to_result()? };
         _js_unpack_args_unwrap_args!(($cx, $callargs, $n+1) $($args)*);
     };
 }

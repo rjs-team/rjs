@@ -1,20 +1,21 @@
 
 use mozjs::jsapi::JSClass;
-use mozjs::jsapi::JSClassOps;
+//use mozjs::jsapi::JSClassOps;
 use mozjs::jsapi::JSFunctionSpec;
 use mozjs::jsapi::JSNativeWrapper;
 use mozjs::jsapi::JSPropertySpec;
 use mozjs::jsapi::JSCLASS_RESERVED_SLOTS_SHIFT;
 
-use mozjs::JSCLASS_GLOBAL_SLOT_COUNT;
-use mozjs::JSCLASS_IS_GLOBAL;
+//use mozjs::JSCLASS_GLOBAL_SLOT_COUNT;
+//use mozjs::JSCLASS_IS_GLOBAL;
 use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
 
 
-use libc::c_char;
+//use libc::c_char;
 use libc::c_uint;
 
 use std::ptr;
+//use std::sync::Mutex;
 
 pub const fn jsclass_has_reserved_slots(n: c_uint) -> c_uint {
     (n & JSCLASS_RESERVED_SLOTS_MASK) << JSCLASS_RESERVED_SLOTS_SHIFT
@@ -47,15 +48,15 @@ pub const fn null_function() -> JSFunctionSpec {
 }
 
 pub trait JSClassInitializer {
-    fn class() -> &'static JSClass;
-    fn functions() -> &'static [JSFunctionSpec];
-    fn properties() -> &'static [JSPropertySpec];
+    //fn class() -> &'static JSClass;
+    fn functions() -> *const JSFunctionSpec;
+    //fn properties() -> &'static [JSPropertySpec];
 }
 
 #[macro_export]
 macro_rules! js_class {
     ($name:ident $($body:tt)*) => {
-        trace_macros!{true}
+        //trace_macros!{true}
 
 //pub struct $name;
 
@@ -63,60 +64,73 @@ macro_rules! js_class {
 
 lazy_static!{
     
-    static ref _CLASS: JSClass = JSClass {
-        name: CString::new(stringify!($name)).unwrap().into_raw(),
-        flags: jsclass_has_reserved_slots(2),
-        cOps: &JSClassOps {
-            addProperty: None,
-            call: None,
-            construct: None,
-            delProperty: None,
-            enumerate: None,
-            finalize: None,
-            getProperty: None,
-            hasInstance: None,
-            mayResolve: None,
-            resolve: None,
-            setProperty: None,
-            trace: None,
-        },
-        reserved: [0 as *mut _; 3],
-    };
+    //static ref _CLASS: JSClass = ;
 
-    static ref _FUNCTIONS: &'static [JSFunctionSpec] = &[
-        //__jsclass_functions!{{} $($body)*}
-        null_function(),
-    ];
+    //static ref _FUNCTIONS: Mutex<&'static [JSFunctionSpec]> = Mutex::new();
 
-    static ref _PROPERTIES: &'static [JSPropertySpec] = &[
-        /*JSPropertySpec {
-            name: b"window\0" as *const u8 as *const c_char,
-            flags: (JSPROP_ENUMERATE | JSPROP_SHARED) as u8,
-            getter: JSNativeWrapper {
-                op: Some(window_window_getter_op),
-                info: ptr::null(),
-            },
-            setter: null_wrapper(),
-        },*/
-        null_property(),
-    ];
+    //static ref _PROPERTIES: *const [JSPropertySpec] = ;
 
 } // lazy_static
 
-/*impl JSClassInitializer for $name {
-    fn class() -> &'static JSClass {
-        &_CLASS
+impl JSClassInitializer for $name {
+    /*fn class() -> &'static JSClass {
+        &JSClass {
+            name: CString::new(stringify!($name)).unwrap().into_raw(),
+            flags: jsclass_has_reserved_slots(2),
+            cOps: &JSClassOps {
+                addProperty: None,
+                call: None,
+                construct: None,
+                delProperty: None,
+                enumerate: None,
+                finalize: None,
+                getProperty: None,
+                hasInstance: None,
+                mayResolve: None,
+                resolve: None,
+                setProperty: None,
+                trace: None,
+            },
+            reserved: [0 as *mut _; 3],
+        }
+    }*/
+
+    fn functions() -> *const JSFunctionSpec {
+        unsafe {
+            static mut FNS : *const JSFunctionSpec = ptr::null();
+            static ONCE: Once = ONCE_INIT;
+
+            ONCE.call_once(|| {
+                let fbox = vec![
+                    //__jsclass_functions!{{} $($body)*}
+                    null_function(),
+                ].into_boxed_slice();
+
+                let fboxptr = Box::into_raw(fbox);
+
+                FNS = &(*fboxptr)[0];
+            });
+
+            FNS
+        }
     }
 
-    fn functions() -> &'static [JSFunctionSpec] {
-        &_FUNCTIONS
-    }
-
-    fn properties() -> &'static [JSPropertySpec] {
-        &_PROPERTIES
-    }
+    /*fn properties() -> &'static [JSPropertySpec] {
+        &[
+            /*JSPropertySpec {
+                name: b"window\0" as *const u8 as *const c_char,
+                flags: (JSPROP_ENUMERATE | JSPROP_SHARED) as u8,
+                getter: JSNativeWrapper {
+                    op: Some(window_window_getter_op),
+                    info: ptr::null(),
+                },
+                setter: null_wrapper(),
+            },*/
+            null_property(),
+        ]
+    }*/
 }
-*/
+
 
     
     }

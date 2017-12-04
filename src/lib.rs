@@ -9,7 +9,7 @@ extern crate libc;
 extern crate tokio_core;
 // extern crate tokio_timer;
 extern crate futures;
-#[macro_use]
+//#[macro_use]
 extern crate lazy_static;
 
 
