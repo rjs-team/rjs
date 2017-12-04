@@ -72,7 +72,7 @@ macro_rules! js_unpack_args {
         js_unpack_args!({$fn, $cx, $callargs} ($($args)*));
     };
     ({$fn:expr, $cx:expr, $callargs:expr} ($($args:tt)*)) => {
-        if $callargs._base.argc_ != _js_unpack_args_count!($($args)+,) {
+        if $callargs._base.argc_ != _js_unpack_args_count!($($args)*,) {
             return Err(Some(format!("{}() requires exactly {} argument", $fn, _js_unpack_args_count!($($args)*,)).into()));
         }
         _js_unpack_args_unwrap_args!(($cx, $callargs, 0) $($args)*,);

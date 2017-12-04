@@ -51,6 +51,7 @@ use mozjs::jsval;
 use jsval::JSVal;
 use jsval::{ObjectValue, UndefinedValue};
 use jsapi::{HandleObject};
+use mozjs::jsapi::{ JSPROP_ENUMERATE, JSPROP_SHARED };
 use mozjs::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
 use mozjs::conversions::{FromJSValConvertible, ToJSValConvertible};
 use mozjs::conversions::ConversionResult;
@@ -319,9 +320,15 @@ struct Test {
 
 js_class!{ Test
 
-    fn puts(_rcx: &'static RJSContext, arg: String) -> JSRet<()> {
+    fn test_puts(_rcx: &'static RJSContext, arg: String) -> JSRet<()> {
         println!("{}", arg);
         Ok(())
+    }
+
+    @prop test_prop {
+        get fn Test_get_test_prop(_rcx: &'static RJSContext) -> JSRet<String> {
+            Ok(String::from("Test prop"))
+        }
     }
 
 }
