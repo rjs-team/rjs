@@ -14,6 +14,7 @@ use mozjs::jsapi::JSCLASS_RESERVED_SLOTS_SHIFT;
 //use mozjs::JSCLASS_IS_GLOBAL;
 use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
 
+use jslib::jsfn::RJSFn;
 
 //use libc::c_char;
 use libc::c_uint;
@@ -56,17 +57,27 @@ pub trait JSClassInitializer {
 
         let parent_proto = HandleObject::null();
         let cls = Self::class();
-        let constr = None;
+        let constr = Self::constr();
+        let (constrfn, constrnargs) = constr.map(|c| (Some(c.func()), c.nargs())).unwrap_or((None, 0));
         let props = Self::properties();
         let fns = Self::functions();
-        let static_props = ptr::null();
-        let static_fns = ptr::null();
+        let static_props = Self::static_properties();
+        let static_fns = Self::static_functions();
 
-        JS_InitClass(cx, obj, parent_proto, cls, constr, 0, props, fns, static_props, static_fns)
+        JS_InitClass(cx, obj, parent_proto, cls, constrfn, constrnargs, props, fns, static_props, static_fns)
     }
     fn class() -> *const JSClass;
     fn functions() -> *const JSFunctionSpec;
     fn properties() -> *const JSPropertySpec;
+    fn static_functions() -> *const JSFunctionSpec {
+        ptr::null()
+    }
+    fn static_properties() -> *const JSPropertySpec {
+        ptr::null()
+    }
+    fn constr() -> Option<Box<RJSFn>> {
+        None
+    }
 }
 
 
@@ -191,9 +202,9 @@ macro_rules! __jsclass_functionspec {
                 name: CString::new(stringify!($name)).unwrap().into_raw(),
                 selfHostedName: ptr::null(),
                 flags: JSPROP_ENUMERATE as u16,
-                nargs: $name::nargs() as u16,
+                nargs: $name{}.nargs() as u16,
                 call: JSNativeWrapper {
-                    op: Some($name::func),
+                    op: Some($name{}.func()),
                     info: ptr::null(),
                 },
             }
@@ -226,10 +237,10 @@ macro_rules! __jsclass_propertyspec {
     };
 
     ({$vec:ident, $getter:expr, $setter:expr} @prop $name:ident { get fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
-        __jsclass_propertyspec!{{$vec, JSNativeWrapper { op: Some($fname::func), info: ptr::null() }, $setter} @prop $name { $($rest)* }}
+        __jsclass_propertyspec!{{$vec, JSNativeWrapper { op: Some($fname{}.func()), info: ptr::null() }, $setter} @prop $name { $($rest)* }}
     };
     ({$vec:ident, $getter:expr, $setter:expr} @prop $name:ident { set fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
-        __jsclass_propertyspec!{{$vec, $getter, JSNativeWrapper { op: Some($fname::func), info: ptr::null() }} @prop $name { $($rest)* }}
+        __jsclass_propertyspec!{{$vec, $getter, JSNativeWrapper { op: Some($fname{}.func()), info: ptr::null() }} @prop $name { $($rest)* }}
     };
 }
 

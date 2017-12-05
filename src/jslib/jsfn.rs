@@ -12,24 +12,21 @@ use std::ffi::CString;
 
 pub type JSRet<T: ToJSValConvertible> = Result<T, Option<String>>;
 
-pub struct RJSNativeWrapper {
-    pub func: unsafe extern "C" fn(*mut JSContext, u32, *mut Value) -> bool,
-    pub nargs: c_uint,
-
-}
+pub type RJSNativeRaw = unsafe extern "C" fn(*mut JSContext, u32, *mut Value) -> bool;
 
 pub trait RJSFn {
-    unsafe extern "C" fn func(*mut JSContext, u32, *mut Value) -> bool;
-    fn name() -> &'static str;
-    fn nargs() -> u32;
+    fn func(&self) -> RJSNativeRaw;
+    fn name(&self) -> &'static str;
+    fn nargs(&self) -> u32;
 
-    unsafe fn define_on(cx: *mut JSContext, this: HandleObject, flags: u32) -> *mut JSFunction {
-        let name = CString::new(Self::name()).unwrap().into_raw() as *const libc::c_char;
+    unsafe fn define_on(&self, cx: *mut JSContext, this: HandleObject, flags: u32) -> *mut JSFunction {
+        let name = CString::new(self.name()).unwrap().into_raw() as *const libc::c_char;
 
-        JS_DefineFunction(cx, this, name, Some(Self::func), Self::nargs(), flags)
-
+        JS_DefineFunction(cx, this, name, Some(self.func()), self.nargs(), flags)
     }
 }
+
+
 
 #[macro_export]
 macro_rules! js_fn_raw {
@@ -60,8 +57,6 @@ macro_rules! js_fn_raw {
             }
 
         }
-        
-        
     )
 }
 
@@ -71,19 +66,27 @@ macro_rules! js_fn {
         #[allow(non_camel_case_types)] 
         pub struct $name;
 
-        impl RJSFn for $name {
-            js_fn_raw!{fn func (_cx: *mut JSContext, _rcx: &'static RJSContext, args: CallArgs) -> JSRet<$ret> {
+        impl $name {
+
+            js_fn_raw!{fn rawfunc (_cx: *mut JSContext, _rcx: &'static RJSContext, args: CallArgs) -> JSRet<$ret> {
                 js_unpack_args!({stringify!($name), _cx, _rcx, args} ($($args)*));
 
                 $body
 
             }}
+        }
 
-            fn name() -> &'static str {
+        impl RJSFn for $name {
+
+            fn func(&self) -> rjs::jslib::jsfn::RJSNativeRaw {
+                $name::rawfunc
+            }
+
+            fn name(&self) -> &'static str {
                 stringify!($name)
             }
 
-            fn nargs() -> u32 {
+            fn nargs(&self) -> u32 {
                 _js_unpack_args_count!($($args)*,)
             }
 

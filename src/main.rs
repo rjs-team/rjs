@@ -12,8 +12,6 @@ extern crate tokio_core;
 extern crate futures;
 #[macro_use]
 extern crate rjs;
-#[macro_use]
-extern crate lazy_static;
 
 
 
@@ -79,11 +77,8 @@ use std::ffi::CString;
 use std::marker::PhantomData;
 use std::fmt;
 use std::fmt::Display;
-use std::sync::Mutex;
 use std::sync::{Once, ONCE_INIT};
 
-use rjs::jslib::safefn::myDefineFunction;
-use rjs::jslib::jsfn::RJSNativeWrapper;
 
 
 
@@ -141,10 +136,10 @@ fn main() {
 
         let _ac = JSAutoCompartment::new(cx, global.get());
         unsafe {
-            let _ = puts::define_on(cx, global, 0);
-            let _ = setTimeout::define_on(cx, global, 0);
-            let _ = getFileSync::define_on(cx, global, 0);
-            let _ = readDir::define_on(cx, global, 0);
+            let _ = puts{}.define_on(cx, global, 0);
+            let _ = setTimeout{}.define_on(cx, global, 0);
+            let _ = getFileSync{}.define_on(cx, global, 0);
+            let _ = readDir{}.define_on(cx, global, 0);
 
             Test::init_class(cx, global);
         }
@@ -326,6 +321,11 @@ struct Test {
 }
 
 js_class!{ Test
+
+//    @constructor
+    //fn Test_constructor() -> JSRet<JSVal> {
+//
+    //}
 
     fn test_puts(arg: String) -> JSRet<()> {
         println!("{}", arg);
