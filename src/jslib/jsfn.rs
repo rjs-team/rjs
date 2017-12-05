@@ -1,9 +1,14 @@
 use mozjs::jsapi::JSContext;
 use mozjs::jsapi::JSNative;
+use mozjs::jsapi::JSFunction;
+use mozjs::jsapi::JS_DefineFunction;
 use mozjs::jsapi::Value;
+use mozjs::jsapi::HandleObject;
 use mozjs::conversions::ToJSValConvertible;
 
+use libc;
 use libc::c_uint;
+use std::ffi::CString;
 
 pub type JSRet<T: ToJSValConvertible> = Result<T, Option<String>>;
 
@@ -11,6 +16,19 @@ pub struct RJSNativeWrapper {
     pub func: unsafe extern "C" fn(*mut JSContext, u32, *mut Value) -> bool,
     pub nargs: c_uint,
 
+}
+
+pub trait RJSFn {
+    unsafe extern "C" fn func(*mut JSContext, u32, *mut Value) -> bool;
+    fn name() -> &'static str;
+    fn nargs() -> u32;
+
+    unsafe fn define_on(cx: *mut JSContext, this: HandleObject, flags: u32) -> *mut JSFunction {
+        let name = CString::new(Self::name()).unwrap().into_raw() as *const libc::c_char;
+
+        JS_DefineFunction(cx, this, name, Some(Self::func), Self::nargs(), flags)
+
+    }
 }
 
 #[macro_export]
@@ -49,21 +67,27 @@ macro_rules! js_fn_raw {
 
 #[macro_export]
 macro_rules! js_fn {
-    (fn $name:ident $rawname:ident ($rcx:ident : &'static RJSContext $($args:tt)*) -> JSRet<$ret:ty> $body:tt) => {
+    (fn $name:ident ($($args:tt)*) -> JSRet<$ret:ty> $body:tt) => {
+        #[allow(non_camel_case_types)] 
+        pub struct $name;
 
-        js_fn_raw!{fn $rawname (_cx: *mut JSContext, $rcx: &'static RJSContext, args: CallArgs) -> JSRet<$ret> {
-            js_unpack_args!({stringify!($name), _cx, args} ($($args)*));
+        impl RJSFn for $name {
+            js_fn_raw!{fn func (_cx: *mut JSContext, _rcx: &'static RJSContext, args: CallArgs) -> JSRet<$ret> {
+                js_unpack_args!({stringify!($name), _cx, _rcx, args} ($($args)*));
 
-            $body
+                $body
 
-        }}
+            }}
 
-        #[allow(non_upper_case_globals)]
-        static $name : RJSNativeWrapper = RJSNativeWrapper {
-            func: $rawname,
-            nargs: _js_unpack_args_count!($($args)*,),
+            fn name() -> &'static str {
+                stringify!($name)
+            }
 
-        };
+            fn nargs() -> u32 {
+                _js_unpack_args_count!($($args)*,)
+            }
+
+        }
 
 
     }
@@ -90,14 +114,14 @@ macro_rules! js_callback {
 
 #[macro_export]
 macro_rules! js_unpack_args {
-    ({$fn:expr, $cx:expr, $callargs:expr} (, $($args:tt)*)) => {
-        js_unpack_args!({$fn, $cx, $callargs} ($($args)*));
+    ({$fn:expr, $cx:expr, $rcx:expr, $callargs:expr} (, $($args:tt)*)) => {
+        js_unpack_args!({$fn, $cx, $rcx, $callargs} ($($args)*));
     };
-    ({$fn:expr, $cx:expr, $callargs:expr} ($($args:tt)*)) => {
+    ({$fn:expr, $cx:expr, $rcx:expr, $callargs:expr} ($($args:tt)*)) => {
         if $callargs._base.argc_ != _js_unpack_args_count!($($args)*,) {
             return Err(Some(format!("{}() requires exactly {} argument", $fn, _js_unpack_args_count!($($args)*,)).into()));
         }
-        _js_unpack_args_unwrap_args!(($cx, $callargs, 0) $($args)*,);
+        _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, 0) $($args)*,);
     };
 }
 
@@ -107,6 +131,9 @@ macro_rules! _js_unpack_args_count {
         0
     };
     ($name:ident: @$special:ident, $($args:tt)*) => {
+        _js_unpack_args_count!($($args)*)
+    };
+    ($name:ident: &'static RJSContext, $($args:tt)*) => {
         _js_unpack_args_count!($($args)*)
     };
     ($name:ident: $ty:ty, $($args:tt)*) => {
@@ -122,21 +149,26 @@ macro_rules! _js_unpack_args_count {
 
 #[macro_export]
 macro_rules! _js_unpack_args_unwrap_args {
-    (($cx:expr, $callargs:expr, $n:expr) $(,)*) => {
+    (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $(,)*) => {
     };
     // special: @this
-    (($cx:expr, $callargs:expr, $n:expr) $name:ident : @this, $($args:tt)*) => {
+    (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $name:ident : @this, $($args:tt)*) => {
         let $name = $callargs.thisv();
-        _js_unpack_args_unwrap_args!(($cx, $args, $n+1) $($args)*);
+        _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, $n) $($args)*);
+    };
+    // RJSContext
+    (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $name:ident : &'static RJSContext, $($args:tt)*) => {
+        let $name = $rcx;
+        _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, $n) $($args)*);
     };
     // options
-    (($cx:expr, $callargs:expr, $n:expr) $name:ident : $type:ty {$opt:expr}, $($args:tt)*) => {
+    (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $name:ident : $type:ty {$opt:expr}, $($args:tt)*) => {
         let $name = unsafe { <$type>::from_jsval($cx, $callargs.get($n), $opt).to_result()? };
-        _js_unpack_args_unwrap_args!(($cx, $callargs, $n+1) $($args)*);
+        _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, $n+1) $($args)*);
     };
     // no options
-    (($cx:expr, $callargs:expr, $n:expr) $name:ident : $type:ty, $($args:tt)*) => {
+    (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $name:ident : $type:ty, $($args:tt)*) => {
         let $name = unsafe { <$type>::from_jsval($cx, $callargs.get($n), ()).to_result()? };
-        _js_unpack_args_unwrap_args!(($cx, $callargs, $n+1) $($args)*);
+        _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, $n+1) $($args)*);
     };
 }

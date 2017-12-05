@@ -56,7 +56,7 @@ use mozjs::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
 use mozjs::conversions::{FromJSValConvertible, ToJSValConvertible};
 use mozjs::conversions::ConversionResult;
 //use rjs::jslib::jsclass;
-use rjs::jslib::jsfn::{JSRet};
+use rjs::jslib::jsfn::{JSRet, RJSFn};
 use rjs::jslib::jsclass::{JSClassInitializer, null_function, null_property, null_wrapper, jsclass_has_reserved_slots};
 use mozjs::jsapi::JSClass;
 use mozjs::jsapi::JSClassOps;
@@ -141,18 +141,21 @@ fn main() {
 
         let _ac = JSAutoCompartment::new(cx, global.get());
         unsafe {
-            let _ = myDefineFunction(cx, global, "puts", puts.func, puts.nargs, 0);
-            let _ = myDefineFunction(cx, global, "setTimeout", setTimeout.func, setTimeout.nargs, 0);
-            let _ = myDefineFunction(cx, global, "getFileSync", getFileSync.func, getFileSync.nargs, 0);
-            let _ = myDefineFunction(cx, global, "readDir", readDir.func, readDir.nargs, 0);
+            let _ = puts::define_on(cx, global, 0);
+            let _ = setTimeout::define_on(cx, global, 0);
+            let _ = getFileSync::define_on(cx, global, 0);
+            let _ = readDir::define_on(cx, global, 0);
 
             Test::init_class(cx, global);
         }
 
 
         rooted!(in(cx) let mut rval = UndefinedValue());
-        assert!(rt.evaluate_script(global, &contents,
-                                   &filename, 1, rval.handle_mut()).is_ok());
+        let res = rt.evaluate_script(global, &contents,
+                                   &filename, 1, rval.handle_mut());
+        if !res.is_ok() {
+            unsafe { report_pending_exception(cx); }
+        }
 
         println!("script result: {}", str_from_js(cx, rval));
 
@@ -212,13 +215,13 @@ impl<T> ToResult<T> for Result<mozjs::conversions::ConversionResult<T>, ()> {
 }
 
 
-js_fn!{fn puts _puts(_rcx: &'static RJSContext, arg: String) -> JSRet<()> {
-    println!("{}", arg);
+js_fn!{fn puts(arg: String) -> JSRet<()> {
+    println!("puts: {}", arg);
     Ok(())
 }}
 
 
-js_fn!{fn setTimeout _setTimeout(rcx: &'static RJSContext, callback: Heap<JSVal>, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
+js_fn!{fn setTimeout(rcx: &'static RJSContext, callback: Heap<JSVal>, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
     let timeout = Timeout::new(Duration::from_millis(timeout), &rcx.handle).unwrap();
 
     rcx.handle.spawn(
@@ -253,12 +256,13 @@ js_fn!{fn setTimeout _setTimeout(rcx: &'static RJSContext, callback: Heap<JSVal>
     Ok(())
 }}
 
-js_fn!{fn getFileSync _getFileSync(rcx: &'static RJSContext, path: String) -> JSRet<Option<String>> {
+js_fn!{fn getFileSync(path: String) -> JSRet<Option<String>> {
     if let Ok(mut file) = File::open(path) {
         let mut contents = String::new();
-        file.read_to_string(&mut contents).unwrap();
-
-        Ok(Some(contents))
+        match file.read_to_string(&mut contents) {
+            Ok(_) => Ok(Some(contents)),
+            Err(e) => Err(Some(format!("Error reading contents: {}", e))),
+        }
     } else {
         //args.rval().set(UndefinedValue());
         Ok(None)
@@ -267,7 +271,7 @@ js_fn!{fn getFileSync _getFileSync(rcx: &'static RJSContext, path: String) -> JS
     //true
 }}
 
-js_fn!{fn readDir _readDir(rcx: &'static RJSContext, path: String) -> JSRet<JSVal> {
+js_fn!{fn readDir(rcx: &'static RJSContext, path: String) -> JSRet<JSVal> {
     unsafe{
     rooted!(in(rcx.cx) let arr = JS_NewArrayObject1(rcx.cx, 0));
     rooted!(in(rcx.cx) let mut temp = UndefinedValue());
@@ -323,13 +327,13 @@ struct Test {
 
 js_class!{ Test
 
-    fn test_puts _test_puts(_rcx: &'static RJSContext, arg: String) -> JSRet<()> {
+    fn test_puts(arg: String) -> JSRet<()> {
         println!("{}", arg);
         Ok(())
     }
 
     @prop test_prop {
-        get fn Test_get_test_prop _Test_get_test_prop(_rcx: &'static RJSContext) -> JSRet<String> {
+        get fn Test_get_test_prop() -> JSRet<String> {
             Ok(String::from("Test prop"))
         }
     }
