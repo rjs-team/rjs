@@ -1,4 +1,8 @@
 
+use mozjs::jsapi::JSContext;
+use mozjs::jsapi::JSObject;
+use mozjs::jsapi::JS_InitClass;
+use mozjs::jsapi::HandleObject;
 use mozjs::jsapi::JSClass;
 //use mozjs::jsapi::JSClassOps;
 use mozjs::jsapi::JSFunctionSpec;
@@ -48,6 +52,18 @@ pub const fn null_function() -> JSFunctionSpec {
 }
 
 pub trait JSClassInitializer {
+    unsafe fn init_class(cx: *mut JSContext, obj: HandleObject) -> *mut JSObject {
+
+        let parent_proto = HandleObject::null();
+        let cls = Self::class();
+        let constr = None;
+        let props = Self::properties();
+        let fns = Self::functions();
+        let static_props = ptr::null();
+        let static_fns = ptr::null();
+
+        JS_InitClass(cx, obj, parent_proto, cls, constr, 0, props, fns, static_props, static_fns)
+    }
     fn class() -> *const JSClass;
     fn functions() -> *const JSFunctionSpec;
     fn properties() -> *const JSPropertySpec;
@@ -152,12 +168,12 @@ macro_rules! nothing {
 #[macro_export]
 macro_rules! __jsclass_foreach {
     ($ms:tt $margs:tt ) => { };
-    ({$mop:ident, $mprop:ident, $mfn:ident} $margs:tt  fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        $mfn!{$margs fn $name $args -> JSRet<$ret> { $($body)* }}
+    ({$mop:ident, $mprop:ident, $mfn:ident} $margs:tt  fn $name:ident $rawname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
+        $mfn!{$margs fn $name $rawname $args -> JSRet<$ret> { $($body)* }}
         __jsclass_foreach!{{$mop, $mprop, $mfn} $margs $($rest)*}
     };
-    ({$mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @op($op:ident) fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
-        $mop!{$margs $op fn $name $args -> $ret { $($body)* }}
+    ({$mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @op($op:ident) fn $name:ident $rawname:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
+        $mop!{$margs $op fn $name $rawname $args -> $ret { $($body)* }}
         __jsclass_foreach!{{$mop, $mprop, $mfn} $margs $($rest)*}
     };
     ({$mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @prop $name:ident $body:tt $($rest:tt)*) => {
@@ -168,16 +184,16 @@ macro_rules! __jsclass_foreach {
 
 #[macro_export]
 macro_rules! __jsclass_functionspec {
-    ({$vec:ident} fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}) => {
+    ({$vec:ident} fn $name:ident $rawname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}) => {
         $vec.push(
             JSFunctionSpec {
                 //name: b"log\0" as *const u8 as *const c_char,
                 name: CString::new(stringify!($name)).unwrap().into_raw(),
                 selfHostedName: ptr::null(),
                 flags: JSPROP_ENUMERATE as u16,
-                nargs: 1,
+                nargs: $name.nargs as u16,
                 call: JSNativeWrapper {
-                    op: Some($name),
+                    op: Some($name.func),
                     info: ptr::null(),
                 },
             }
@@ -187,8 +203,8 @@ macro_rules! __jsclass_functionspec {
 
 #[macro_export]
 macro_rules! __jsclass_function {
-    ({} fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}) => {
-        js_fn!{fn $name $args -> JSRet<$ret> { $($body)* } }
+    ({} fn $name:ident $rawname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}) => {
+        js_fn!{fn $name $rawname $args -> JSRet<$ret> { $($body)* } }
     };
 }
 
@@ -209,11 +225,11 @@ macro_rules! __jsclass_propertyspec {
         );
     };
 
-    ({$vec:ident, $getter:expr, $setter:expr} @prop $name:ident { get fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
-        __jsclass_propertyspec!{{$vec, JSNativeWrapper { op: Some($fname), info: ptr::null() }, $setter} @prop $name { $($rest)* }}
+    ({$vec:ident, $getter:expr, $setter:expr} @prop $name:ident { get fn $fname:ident $rawname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
+        __jsclass_propertyspec!{{$vec, JSNativeWrapper { op: Some($fname.func), info: ptr::null() }, $setter} @prop $name { $($rest)* }}
     };
-    ({$vec:ident, $getter:expr, $setter:expr} @prop $name:ident { set fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
-        __jsclass_propertyspec!{{$vec, $getter, JSNativeWrapper { op: Some($fname), info: ptr::null() }} @prop $name { $($rest)* }}
+    ({$vec:ident, $getter:expr, $setter:expr} @prop $name:ident { set fn $fname:ident $rawname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
+        __jsclass_propertyspec!{{$vec, $getter, JSNativeWrapper { op: Some($fname.func), info: ptr::null() }} @prop $name { $($rest)* }}
     };
 }
 
@@ -222,12 +238,12 @@ macro_rules! __jsclass_property {
     ({} @prop $name:ident {}) => {
     };
 
-    ({} @prop $name:ident { get fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
-        js_fn!{fn $fname $args -> JSRet<$ret> { $($body)* } }
+    ({} @prop $name:ident { get fn $fname:ident $rawname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
+        js_fn!{fn $fname $rawname $args -> JSRet<$ret> { $($body)* } }
         __jsclass_property!{{} @prop $name { $($rest)* }}
     };
-    ({} @prop $name:ident { set fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
-        js_fn!{fn $fname $args -> JSRet<$ret> { $($body)* } }
+    ({} @prop $name:ident { set fn $fname:ident $rawname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
+        js_fn!{fn $fname $rawname $args -> JSRet<$ret> { $($body)* } }
         __jsclass_property!{{} @prop $name { $($rest)* }}
     };
 }

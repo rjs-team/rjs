@@ -1,6 +1,17 @@
+use mozjs::jsapi::JSContext;
+use mozjs::jsapi::JSNative;
+use mozjs::jsapi::Value;
 use mozjs::conversions::ToJSValConvertible;
 
+use libc::c_uint;
+
 pub type JSRet<T: ToJSValConvertible> = Result<T, Option<String>>;
+
+pub struct RJSNativeWrapper {
+    pub func: unsafe extern "C" fn(*mut JSContext, u32, *mut Value) -> bool,
+    pub nargs: c_uint,
+
+}
 
 #[macro_export]
 macro_rules! js_fn_raw {
@@ -31,18 +42,29 @@ macro_rules! js_fn_raw {
             }
 
         }
+        
+        
     )
 }
 
 #[macro_export]
 macro_rules! js_fn {
-    (fn $name:ident ($rcx:ident : &'static RJSContext $($args:tt)*) -> JSRet<$ret:ty> $body:tt) => {
-        js_fn_raw!{fn $name (cx: *mut JSContext, $rcx: &'static RJSContext, args: CallArgs) -> JSRet<$ret> {
-            js_unpack_args!({stringify!($name), cx, args} ($($args)*));
+    (fn $name:ident $rawname:ident ($rcx:ident : &'static RJSContext $($args:tt)*) -> JSRet<$ret:ty> $body:tt) => {
+
+        js_fn_raw!{fn $rawname (_cx: *mut JSContext, $rcx: &'static RJSContext, args: CallArgs) -> JSRet<$ret> {
+            js_unpack_args!({stringify!($name), _cx, args} ($($args)*));
 
             $body
 
         }}
+
+        #[allow(non_upper_case_globals)]
+        static $name : RJSNativeWrapper = RJSNativeWrapper {
+            func: $rawname,
+            nargs: _js_unpack_args_count!($($args)*,),
+
+        };
+
 
     }
 
@@ -81,7 +103,7 @@ macro_rules! js_unpack_args {
 
 #[macro_export]
 macro_rules! _js_unpack_args_count {
-    ($(,)*) => {
+    () => {
         0
     };
     ($name:ident: @$special:ident, $($args:tt)*) => {
@@ -92,6 +114,9 @@ macro_rules! _js_unpack_args_count {
     };
     ($name:ident: $ty:ty {$opt:expr}, $($args:tt)*) => {
         1 + _js_unpack_args_count!($($args)*)
+    };
+    ($(,)+ $($rest:tt)*) => {
+        _js_unpack_args_count!($($rest)*)
     };
 }
 
