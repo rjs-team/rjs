@@ -15,9 +15,9 @@ try {
 	puts('Caught error: '+e);
 }
 
-//var t = Object.create(Test.prototype); //new Test();
-puts("Test: " + Object.keys(Test));
-Test.test_puts(Test.test_prop);
+var t = new Test();
+puts("Test: " + Object.keys(Test.prototype) + ";");
+t.test_puts(t.test_prop);
 
 1 + 2 + Object
 

@@ -107,7 +107,7 @@ use std::ffi::CString;
 //                ptr::null(), ptr::null(), ptr::null(), ptr::null());
 // }
 
-pub unsafe fn myDefineFunction(
+/*pub unsafe fn myDefineFunction(
     cx: *mut JSContext, 
     this: HandleObject, 
     name: &str, 
@@ -116,4 +116,4 @@ pub unsafe fn myDefineFunction(
     flags: u32) -> *mut JSFunction {
     JS_DefineFunction(cx, this, CString::new(name).unwrap().as_ptr() as *const libc::c_char, Some(f), nargs, flags)
 }
-
+*/

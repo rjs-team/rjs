@@ -139,6 +139,9 @@ macro_rules! _js_unpack_args_count {
     ($name:ident: &'static RJSContext, $($args:tt)*) => {
         _js_unpack_args_count!($($args)*)
     };
+    ($name:ident: CallArgs, $($args:tt)*) => {
+        _js_unpack_args_count!($($args)*)
+    };
     ($name:ident: $ty:ty, $($args:tt)*) => {
         1 + _js_unpack_args_count!($($args)*)
     };
@@ -162,6 +165,11 @@ macro_rules! _js_unpack_args_unwrap_args {
     // RJSContext
     (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $name:ident : &'static RJSContext, $($args:tt)*) => {
         let $name = $rcx;
+        _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, $n) $($args)*);
+    };
+    // CallArgs
+    (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $name:ident : CallArgs, $($args:tt)*) => {
+        let $name = $callargs;
         _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, $n) $($args)*);
     };
     // options

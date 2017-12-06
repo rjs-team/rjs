@@ -25,12 +25,14 @@ use futures::sync::oneshot;
 use std::os::raw::c_void;
 use mozjs::jsapi;
 use jsapi::CallArgs;
+use jsapi::JSObject;
 use jsapi::CompartmentOptions;
 use jsapi::Heap;
 use jsapi::JSAutoCompartment;
 use jsapi::JSContext;
 //use jsapi::JSFunction;
 use jsapi::JS_CallFunctionValue;
+use jsapi::JS_NewObjectForConstructor;
 //use jsapi::JS_DefineFunction;
 use jsapi::JS_EncodeStringToUTF8;
 use jsapi::JS_free;
@@ -322,10 +324,12 @@ struct Test {
 
 js_class!{ Test
 
-//    @constructor
-    //fn Test_constructor() -> JSRet<JSVal> {
-//
-    //}
+    @constructor
+    fn Test_constructor(rcx: &'static RJSContext, args: CallArgs) -> JSRet<*mut JSObject> {
+        let obj = unsafe { JS_NewObjectForConstructor(rcx.cx, Test::class(), &args) };
+
+        Ok(obj)
+    }
 
     fn test_puts(arg: String) -> JSRet<()> {
         println!("{}", arg);

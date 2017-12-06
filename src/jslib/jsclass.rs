@@ -104,7 +104,7 @@ macro_rules! js_class {
 
 //pub struct $name;
 
-__jsclass_foreach!{{nothing, __jsclass_property, __jsclass_function} {} $($body)*}
+__jsclass_foreach!{{__jsclass_function, nothing, __jsclass_property, __jsclass_function} {} $($body)*}
 
 
 impl JSClassInitializer for $name {
@@ -135,13 +135,21 @@ impl JSClassInitializer for $name {
         }
     }
 
+    fn constr() -> Option<Box<RJSFn>> {
+
+        __jsclass_foreach!{{__jsclass_constrspec, nothing, nothing, nothing} {} $($body)*}
+
+        #[allow(unreachable_code)]
+        None
+    }
+
     fn functions() -> *const JSFunctionSpec {
         compute_once!{
             *const JSFunctionSpec = ptr::null();
             {
                 let mut fspecs: Vec<JSFunctionSpec> = vec![];
 
-                __jsclass_foreach!{{nothing, nothing, __jsclass_functionspec} {fspecs} $($body)*};
+                __jsclass_foreach!{{nothing, nothing, nothing, __jsclass_functionspec} {fspecs} $($body)*};
                 fspecs.push(null_function());
 
                 let fboxptr = Box::into_raw(fspecs.into_boxed_slice());
@@ -156,7 +164,7 @@ impl JSClassInitializer for $name {
             {
                 let mut pspecs: Vec<JSPropertySpec> = vec![];
 
-                __jsclass_foreach!{{nothing, __jsclass_propertyspec, nothing} {pspecs} $($body)*};
+                __jsclass_foreach!{{nothing, nothing, __jsclass_propertyspec, nothing} {pspecs} $($body)*};
                 pspecs.push(null_property());
 
                 let pboxptr = Box::into_raw(pspecs.into_boxed_slice());
@@ -179,17 +187,28 @@ macro_rules! nothing {
 #[macro_export]
 macro_rules! __jsclass_foreach {
     ($ms:tt $margs:tt ) => { };
-    ({$mop:ident, $mprop:ident, $mfn:ident} $margs:tt  fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
+    ({$mconstr:ident, $mop:ident, $mprop:ident, $mfn:ident} $margs:tt  fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
         $mfn!{$margs fn $name $args -> JSRet<$ret> { $($body)* }}
-        __jsclass_foreach!{{$mop, $mprop, $mfn} $margs $($rest)*}
+        __jsclass_foreach!{{$mconstr, $mop, $mprop, $mfn} $margs $($rest)*}
     };
-    ({$mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @op($op:ident) fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
+    ({$mconstr:ident, $mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @constructor fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
+        $mconstr!{$margs fn $name $args -> JSRet<$ret> { $($body)* }}
+        __jsclass_foreach!{{$mconstr, $mop, $mprop, $mfn} $margs $($rest)*}
+    };
+    ({$mconstr:ident, $mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @op($op:ident) fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
         $mop!{$margs $op fn $name $args -> $ret { $($body)* }}
-        __jsclass_foreach!{{$mop, $mprop, $mfn} $margs $($rest)*}
+        __jsclass_foreach!{{$mconstr, $mop, $mprop, $mfn} $margs $($rest)*}
     };
-    ({$mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @prop $name:ident $body:tt $($rest:tt)*) => {
+    ({$mconstr:ident, $mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @prop $name:ident $body:tt $($rest:tt)*) => {
         $mprop!{$margs @prop $name $body }
-        __jsclass_foreach!{{$mop, $mprop, $mfn} $margs $($rest)*}
+        __jsclass_foreach!{{$mconstr, $mop, $mprop, $mfn} $margs $($rest)*}
+    };
+}
+
+#[macro_export]
+macro_rules! __jsclass_constrspec {
+    ({} fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}) => {
+        return Some(Box::new($name{}));
     };
 }
 
