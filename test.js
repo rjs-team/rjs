@@ -19,5 +19,7 @@ var t = new Test();
 puts("Test: " + Object.keys(Test.prototype) + ";");
 t.test_puts(t.test_prop);
 
+puts("Globals: " + Object.keys(this));
+
 1 + 2 + Object
 

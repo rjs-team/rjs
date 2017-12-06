@@ -35,12 +35,13 @@ macro_rules! js_fn_raw {
         unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
             let args = CallArgs::from_vp(vp, argc);
             let rt = JS_GetRuntime(cx);
-            let rcx = JS_GetRuntimePrivate(rt) as *mut RJSContext;
+            let rcxweak = JS_GetRuntimePrivate(rt) as *const eventloop::WeakHandle<RJSContextInner>;
+            let rcx = (*rcxweak).upgrade().unwrap();
             assert!((*rcx).cx == cx);
 
             fn rustImpl($($param : $type),*) -> JSRet<$ret> $body
 
-            let result = rustImpl(cx, &*rcx, args);
+            let result = rustImpl(cx, rcx, args);
             match result {
                 Ok(v) => {
                     v.to_jsval(cx, args.rval());
@@ -68,7 +69,7 @@ macro_rules! js_fn {
 
         impl $name {
 
-            js_fn_raw!{fn rawfunc (_cx: *mut JSContext, _rcx: &'static RJSContext, args: CallArgs) -> JSRet<$ret> {
+            js_fn_raw!{fn rawfunc (_cx: *mut JSContext, _rcx: RJSContext, args: CallArgs) -> JSRet<$ret> {
                 js_unpack_args!({stringify!($name), _cx, _rcx, args} ($($args)*));
 
                 $body
@@ -136,7 +137,7 @@ macro_rules! _js_unpack_args_count {
     ($name:ident: @$special:ident, $($args:tt)*) => {
         _js_unpack_args_count!($($args)*)
     };
-    ($name:ident: &'static RJSContext, $($args:tt)*) => {
+    ($name:ident: RJSContext, $($args:tt)*) => {
         _js_unpack_args_count!($($args)*)
     };
     ($name:ident: CallArgs, $($args:tt)*) => {
@@ -163,7 +164,7 @@ macro_rules! _js_unpack_args_unwrap_args {
         _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, $n) $($args)*);
     };
     // RJSContext
-    (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $name:ident : &'static RJSContext, $($args:tt)*) => {
+    (($cx:expr, $rcx:expr, $callargs:expr, $n:expr) $name:ident : RJSContext, $($args:tt)*) => {
         let $name = $rcx;
         _js_unpack_args_unwrap_args!(($cx, $rcx, $callargs, $n) $($args)*);
     };
