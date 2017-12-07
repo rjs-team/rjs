@@ -12,6 +12,7 @@ extern crate tokio_core;
 extern crate futures;
 //#[macro_use]
 extern crate lazy_static;
+extern crate slab;
 
 
 #[cfg(test)]

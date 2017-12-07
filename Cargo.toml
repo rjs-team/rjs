@@ -14,6 +14,7 @@ tokio-timer = "0.1.1"
 futures = "0.1"
 # concat_bytes = "0.1.0"
 lazy_static = "1.0.0"
+slab = "0.4.0"
 
 [package.metadata.android]
 label = "Using assets android-rs-glue example"

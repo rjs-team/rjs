@@ -4,19 +4,29 @@ extern crate tokio_core;
 extern crate futures;
 
 use tokio_core::reactor as tokio;
-//use futures::Future;
+use futures::Future;
 use futures::future;
 use futures::Stream;
+use futures::IntoFuture;
 // use futures::future::{FutureResult};
 // use tokio_timer::{Timer, TimerError};
+use futures::sync::oneshot;
 use futures::sync::mpsc;
+use futures::sync::mpsc::UnboundedSender;
 //use futures::future::IntoFuture;
 
 //use std::ops::Deref;
 use std::sync::{Arc, Weak};
-use std::boxed::FnBox;
+use std::rc;
+use std::rc::Rc;
+//use std::boxed::FnBox;
 use std::clone::Clone;
+use std::marker::PhantomData;
+use std::any::Any;
+use slab::Slab;
 
+//type EventLoopFn<T> = for<'t> Fn(&'t T, Handle<T>);
+type Message<T> = (Remote<T>, Box<FnBox<T>>);
 
 pub fn run<T, F>(t: &T, first: F)
     where T: Sized,
@@ -24,39 +34,105 @@ pub fn run<T, F>(t: &T, first: F)
 {
     let mut core = tokio::Core::new().unwrap();
 
-    let (tx, rx) = mpsc::unbounded::<Box<for<'t> FnBox(&'t T)>>();
+    let (tx, rx) = mpsc::unbounded::<Message<T>>();
     let tx = Arc::new(tx);
 
-    let handle = Handle(tx);
+    let slab: Rc<Slab<Box<Any>>> = Rc::new(Slab::new());
+
+    let core_handle = core.handle();
+
+    let remote = Remote(tx);
+    let handle = Handle {
+        remote: remote,
+        thandle: core_handle.clone(),
+        slab: Rc::downgrade(&slab),
+    };
+
 
     let _ : Result<(), ()> = core.run(future::lazy(|| {
 
         first(handle);
 
 
-        rx.for_each(|f| -> Result<(), ()> { 
-            f.call_box((&t,));
+        rx.for_each(|tuple| -> Result<(), ()> { 
+            let (remote, f) = tuple;
+            let handle = Handle {
+                remote: remote,
+                thandle: core_handle.clone(),
+                slab: Rc::downgrade(&slab),
+            };
+            f.call_box(&t, handle);
             Ok(())
         })
     }));
-
 }
 
-pub struct Handle<T>(Arc<mpsc::UnboundedSender<Box<for<'t> FnBox(&'t T)>>>);
-impl<T> Clone for Handle<T> {
-    fn clone(&self) -> Self {
-        Handle(self.0.clone())
-    }
+#[derive(Clone)]
+pub struct Handle<T> {
+    remote: Remote<T>,
+    thandle: tokio::Handle,
+    slab: rc::Weak<Slab<Box<Any>>>,
 }
 
 impl<T> Handle<T> {
+    fn core_handle(&self) -> &tokio::Handle {
+        &self.thandle
+    }
+
+    fn store<V: 'static>(&self, v: V) -> RemoteRef<V> {
+        let slab = self.slab.upgrade().unwrap();
+
+        let key = slab.insert(Box::new(v));
+
+        let (tx, rx) = oneshot::channel::<()>();
+        self.thandle.spawn(rx.then(|_| {
+            let slab = self.slab.upgrade().unwrap();
+            drop(slab.remove(key));
+            Ok(())
+        }));
+
+        RemoteRef {
+            tx: Arc::new(tx),
+            key: key,
+            marker: PhantomData,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct RemoteRef<V> {
+    tx: Arc<oneshot::Sender<()>>,
+    key: usize,
+    marker: PhantomData<V>,
+}
+
+pub struct Remote<T>(Arc<mpsc::UnboundedSender<Message<T>>>);
+impl<T> Clone for Remote<T> {
+    fn clone(&self) -> Self {
+        Remote(self.0.clone())
+    }
+}
+
+impl<T> Remote<T> {
 
     pub fn spawn<F>(&self, f: F)
-        where F: for<'aa> FnOnce(&'aa T, Self) + Send
+        where F: FnOnce(&T, Handle<T>) + Send + 'static
     {
-        let me: Handle<T> = (*self).clone();
-        let fb = Box::new(|t| { f(t, me) });
-        self.0.unbounded_send(fb).unwrap()
+        let me: Remote<T> = (*self).clone();
+        let myfunc: Box<FnBox<T> + 'static> = Box::new( f );
+        //let myfunc: Box<FnBox<T>> = Box::new( |a, b| f(a, b) );
+        let fb = (me, myfunc);
+        (*self.0).unbounded_send(fb).unwrap()
+    }
+}
+
+trait FnBox<T>: Send {
+    fn call_box(self: Box<Self>, t: &T, h: Handle<T>);
+}
+
+impl<T, F: FnOnce(&T, Handle<T>) + Send + 'static> FnBox<T> for F {
+    fn call_box(self: Box<Self>, t: &T, h: Handle<T>) {
+        (*self)(t, h)
     }
 }
 

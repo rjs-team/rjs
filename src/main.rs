@@ -162,35 +162,40 @@ js_fn!{fn puts(arg: String) -> JSRet<()> {
 }}
 
 
-js_fn!{fn setTimeout(rcx: &RJSContext, callback: Heap<JSVal>, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
+js_fn!{fn setTimeout(rcx: &RJSContext, remote: &RJSRemote, callback: JSVal, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
+    rooted!(in(rcx.cx) let callback = callback);
 
-    rcx.spawn(|handle| {
+    remote.spawn(|rcx, remote, handle| {
         let timeout = Timeout::new(Duration::from_millis(timeout), handle).unwrap();
 
-        timeout.map_err(|_|()).and_then(move|_| {
-            rooted!(in(rcx.cx) let this_val = rcx.global.get());
-            rooted!(in(rcx.cx) let mut rval = UndefinedValue());
+        handle.spawn(
+            timeout.map_err(|_|()).and_then(move|_| {
+                remote.spawn(move|rcx, remote, handle| {
+                    rooted!(in(rcx.cx) let this_val = rcx.global.get());
+                    rooted!(in(rcx.cx) let mut rval = UndefinedValue());
 
-            unsafe {
-                let ok = JS_CallFunctionValue(
-                    rcx.cx,
-                    this_val.handle(),
-                    callback.handle(),
-                    &jsapi::HandleValueArray {
-                        elements_: ptr::null_mut(),
-                        length_: 0,
-                    },
-                    rval.handle_mut());
+                    unsafe {
+                        let ok = JS_CallFunctionValue(
+                            rcx.cx,
+                            this_val.handle(),
+                            callback.handle(),
+                            &jsapi::HandleValueArray {
+                                elements_: ptr::null_mut(),
+                                length_: 0,
+                            },
+                            rval.handle_mut());
 
-                if !ok {
-                    println!("error!");
-                    report_pending_exception(rcx.cx);
-                }
-            }
+                        if !ok {
+                            println!("error!");
+                            report_pending_exception(rcx.cx);
+                        }
+                    }
+                });
 
 
-            Ok(())
-        })
+                Ok(())
+            })
+        )
     });
 
     Ok(())
