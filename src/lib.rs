@@ -2,6 +2,7 @@
 #![feature(const_fn)]
 #![feature(libc)]
 #![feature(trace_macros)]
+#![feature(fnbox)]
 // #![cfg(feature = "debugmozjs")]
 
 extern crate mozjs;

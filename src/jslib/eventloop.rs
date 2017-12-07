@@ -4,43 +4,63 @@ extern crate tokio_core;
 extern crate futures;
 
 use tokio_core::reactor as tokio;
-use futures::Future;
+//use futures::Future;
 use futures::future;
+use futures::Stream;
 // use futures::future::{FutureResult};
 // use tokio_timer::{Timer, TimerError};
-use futures::sync::oneshot;
-use futures::future::IntoFuture;
+use futures::sync::mpsc;
+//use futures::future::IntoFuture;
 
-use std::ops::Deref;
+//use std::ops::Deref;
 use std::sync::{Arc, Weak};
+use std::boxed::FnBox;
+use std::clone::Clone;
 
 
-pub fn run<T, F>(t: T, first: F)
+pub fn run<T, F>(t: &T, first: F)
     where T: Sized,
           F: FnOnce(Handle<T>) -> ()
 {
     let mut core = tokio::Core::new().unwrap();
 
-    // this is used to keep track of all pending daemons and callbacks, when there are no more handles to tx, rx will close and the main thread will exit
-    let (tx, rx) = oneshot::channel::<()>();
+    let (tx, rx) = mpsc::unbounded::<Box<for<'t> FnBox(&'t T)>>();
     let tx = Arc::new(tx);
 
-    let remote = core.remote();
+    let handle = Handle(tx);
 
     let _ : Result<(), ()> = core.run(future::lazy(|| {
 
-        first(Handle(Arc::new(Inner {
-            remote: remote,
-            tx: tx,
-            t: t,
-        }) ));
+        first(handle);
 
 
-        rx.then(|_| Ok(()))
+        rx.for_each(|f| -> Result<(), ()> { 
+            f.call_box((&t,));
+            Ok(())
+        })
     }));
 
 }
 
+pub struct Handle<T>(Arc<mpsc::UnboundedSender<Box<for<'t> FnBox(&'t T)>>>);
+impl<T> Clone for Handle<T> {
+    fn clone(&self) -> Self {
+        Handle(self.0.clone())
+    }
+}
+
+impl<T> Handle<T> {
+
+    pub fn spawn<F>(&self, f: F)
+        where F: for<'aa> FnOnce(&'aa T, Self) + Send
+    {
+        let me: Handle<T> = (*self).clone();
+        let fb = Box::new(|t| { f(t, me) });
+        self.0.unbounded_send(fb).unwrap()
+    }
+}
+
+/*
 #[derive(Debug)]
 pub struct Handle<T: Sized>(Arc<Inner<T>>);
 #[derive(Debug)]
@@ -83,6 +103,6 @@ impl<T> WeakHandle<T> {
         self.0.upgrade().map(|inner| Handle(inner))
     }
 }
-
+*/
 
 

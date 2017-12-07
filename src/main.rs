@@ -101,15 +101,15 @@ fn main() {
                            &CompartmentOptions::default()) }
     );
     let global = global_root.handle();
-    let rcxinner = RJSContextInner {
+    let rcx = RJSContext {
         cx: cx,
         global: global,
     };
 
-    eventloop::run(rcxinner, |handle| {
+    eventloop::run(&rcx, |handle| {
 
-        let rawhandlebox = Box::into_raw(Box::new(handle));
-        unsafe { JS_SetRuntimePrivate(rt.rt(), rawhandlebox as *mut c_void) };
+        let privatebox : Box<(&RJSContext, eventloop::Handle<RJSContext>)> = Box::new((&rcx, handle));
+        unsafe { JS_SetRuntimePrivate(rt.rt(), Box::into_raw(privatebox) as *mut c_void) };
 
 
         // let res = JS_InitStandardClasses(cx, global);
@@ -162,7 +162,7 @@ js_fn!{fn puts(arg: String) -> JSRet<()> {
 }}
 
 
-js_fn!{fn setTimeout(rcx: RJSContext, callback: Heap<JSVal>, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
+js_fn!{fn setTimeout(rcx: &RJSContext, callback: Heap<JSVal>, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
 
     rcx.spawn(|handle| {
         let timeout = Timeout::new(Duration::from_millis(timeout), handle).unwrap();
@@ -210,7 +210,7 @@ js_fn!{fn getFileSync(path: String) -> JSRet<Option<String>> {
     //true
 }}
 
-js_fn!{fn readDir(rcx: RJSContext, path: String) -> JSRet<JSVal> {
+js_fn!{fn readDir(rcx: &RJSContext, path: String) -> JSRet<JSVal> {
     unsafe {
         rooted!(in(rcx.cx) let arr = JS_NewArrayObject1(rcx.cx, 0));
         rooted!(in(rcx.cx) let mut temp = UndefinedValue());
@@ -237,13 +237,12 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
 }
 
 #[derive(Debug)]
-struct RJSContextInner {
+struct RJSContext {
     cx: *mut JSContext,
     global: HandleObject,
 }
 
-//pub struct RJSContext(eventloop::Handle<RJSContextInner>);
-pub type RJSContext = eventloop::Handle<RJSContextInner>;
+pub type RJSRemote = eventloop::Handle<RJSContext>;
 
 
 
@@ -254,7 +253,7 @@ struct Test {
 js_class!{ Test
 
     @constructor
-    fn Test_constructor(rcx: RJSContext, args: CallArgs) -> JSRet<*mut JSObject> {
+    fn Test_constructor(rcx: &RJSContext, args: CallArgs) -> JSRet<*mut JSObject> {
         let obj = unsafe { JS_NewObjectForConstructor(rcx.cx, Test::class(), &args) };
 
         Ok(obj)
