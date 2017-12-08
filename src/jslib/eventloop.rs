@@ -24,6 +24,8 @@ use std::clone::Clone;
 use std::marker::PhantomData;
 use std::any::Any;
 use slab::Slab;
+use std::cell::{RefCell, Ref, RefMut};
+use std::fmt::Debug;
 
 //type EventLoopFn<T> = for<'t> Fn(&'t T, Handle<T>);
 type Message<T> = (Remote<T>, Box<FnBox<T>>);
@@ -37,7 +39,7 @@ pub fn run<T, F>(t: &T, first: F)
     let (tx, rx) = mpsc::unbounded::<Message<T>>();
     let tx = Arc::new(tx);
 
-    let slab: Rc<Slab<Box<Any>>> = Rc::new(Slab::new());
+    let slab: Rc<RefCell<Slab<RefCell<Option<*mut ()>>>>> = Rc::new(RefCell::new(Slab::new()));
 
     let core_handle = core.handle();
 
@@ -53,7 +55,6 @@ pub fn run<T, F>(t: &T, first: F)
 
         first(handle);
 
-
         rx.for_each(|tuple| -> Result<(), ()> { 
             let (remote, f) = tuple;
             let handle = Handle {
@@ -61,7 +62,7 @@ pub fn run<T, F>(t: &T, first: F)
                 thandle: core_handle.clone(),
                 slab: Rc::downgrade(&slab),
             };
-            f.call_box(&t, handle);
+            f.call_box(t, handle);
             Ok(())
         })
     }));
@@ -71,23 +72,39 @@ pub fn run<T, F>(t: &T, first: F)
 pub struct Handle<T> {
     remote: Remote<T>,
     thandle: tokio::Handle,
-    slab: rc::Weak<Slab<Box<Any>>>,
+    slab: rc::Weak<RefCell<Slab<RefCell<Option<*mut ()>>>>>,
 }
 
 impl<T> Handle<T> {
-    fn core_handle(&self) -> &tokio::Handle {
+    pub fn core_handle(&self) -> &tokio::Handle {
         &self.thandle
     }
+    pub fn remote(&self) -> &Remote<T> {
+        &self.remote
+    }
 
-    fn store<V: 'static>(&self, v: V) -> RemoteRef<V> {
+    pub fn store_new<V: 'static>(&self, v: V) -> RemoteRef<V> {
         let slab = self.slab.upgrade().unwrap();
+        let mut slab = slab.borrow_mut();
 
-        let key = slab.insert(Box::new(v));
+        let key = slab.insert(RefCell::new(Some(Box::into_raw(Box::new(v)) as *mut ())));
 
         let (tx, rx) = oneshot::channel::<()>();
-        self.thandle.spawn(rx.then(|_| {
-            let slab = self.slab.upgrade().unwrap();
-            drop(slab.remove(key));
+        let weakslab = self.slab.clone();
+        self.thandle.spawn(rx.then(move|_| {
+            println!("RemoteRef drop");
+            let slab = weakslab.upgrade().unwrap();
+            let mut slab = slab.borrow_mut();
+            let r = slab.remove(key);
+            let o = r.into_inner();
+            match o {
+                Some(p) => {
+                    let b: Box<V> = unsafe { Box::from_raw(p as *mut V) };
+                    drop(b);
+                },
+                None => (),
+            };
+
             Ok(())
         }));
 
@@ -97,14 +114,69 @@ impl<T> Handle<T> {
             marker: PhantomData,
         }
     }
+
+    pub fn retrieve<V: Debug + 'static>(&self, rref: RemoteRef<V>) -> Option<V> {
+        let slab = self.slab.upgrade().unwrap();
+        let slab = slab.borrow();
+        let r = unsafe { slab.get_unchecked(rref.key) };
+        let o = r.replace(None);
+        let val = o.map(|p: *mut ()| {
+            let b: Box<V> = unsafe { Box::from_raw(p as *mut V) };
+            *b
+        }); 
+        println!("retrieved: {:?}", val);
+        val
+    }
+
+    // This seems impossible to do without a Ref<Ref<V>>
+    /*fn borrow<'h: 'r, 'r, V: 'static>(&self, rref: &'r RemoteRef<V>) -> Option<Ref<'r, V>> {
+        let slab = self.slab.upgrade().unwrap();
+        let slab = slab.borrow();
+        let mut out = None;
+
+        let refopt: Ref<Option<Ref<V>>> = Ref::map(slab, |slab| {
+            let r: &RefCell<Option<*mut ()>> = unsafe { slab.get_unchecked(rref.key) };
+            let ro = r.try_borrow();
+
+            match ro {
+                Err(_) => &out,
+                Ok(rro) => {
+                    out = rro.rewrap_map(|vp| unsafe { &*(*vp as *mut V) });
+                    &out
+                }
+            }
+        });
+        match *refopt {
+            Some(_) => Some(Ref::map(refopt, |o| o.unwrap())),
+            None => None,
+        }
+    }
+    fn borrow_mut<V: 'static>(&self, rref: &RemoteRef<V>) -> Option<RefMut<V>> {
+
+        None
+    }*/
 }
+
+/*trait Rewrap<'b, T> {
+    fn rewrap_map<V, F: FnOnce(&T) -> &V>(self, f: F) -> Option<Ref<'b, V>>;
+}
+impl<'b, T> Rewrap<'b, T> for Ref<'b, Option<T>> {
+    fn rewrap_map<V, F: FnOnce(&T) -> &V>(self, f: F) -> Option<Ref<'b, V>> {
+        match *self {
+            None => None,
+            Some(_) => Some(Ref::map(self, |o| f(&o.unwrap()))),
+        }
+    }
+}*/
 
 #[derive(Clone)]
 pub struct RemoteRef<V> {
     tx: Arc<oneshot::Sender<()>>,
     key: usize,
-    marker: PhantomData<V>,
+    marker: PhantomData<*const V>,
 }
+
+unsafe impl<V> Send for RemoteRef<V> {}
 
 pub struct Remote<T>(Arc<mpsc::UnboundedSender<Message<T>>>);
 impl<T> Clone for Remote<T> {

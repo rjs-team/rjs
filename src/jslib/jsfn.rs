@@ -35,7 +35,7 @@ macro_rules! js_fn_raw {
         unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
             let args = CallArgs::from_vp(vp, argc);
             let rt = JS_GetRuntime(cx);
-            let privatebox = JS_GetRuntimePrivate(rt) as *const (&RJSContext, RJSRemote);
+            let privatebox = JS_GetRuntimePrivate(rt) as *const (&RJSContext, RJSHandle);
             let rcx = (*privatebox).0;
             let remote = &(*privatebox).1;
             assert!(rcx.cx == cx);
@@ -70,8 +70,8 @@ macro_rules! js_fn {
 
         impl $name {
 
-            js_fn_raw!{fn rawfunc (_rcx: &RJSContext, _remote: &RJSRemote, args: CallArgs) -> JSRet<$ret> {
-                js_unpack_args!({stringify!($name), _rcx, _remote, args} ($($args)*));
+            js_fn_raw!{fn rawfunc (_rcx: &RJSContext, _handle: &RJSHandle, args: CallArgs) -> JSRet<$ret> {
+                js_unpack_args!({stringify!($name), _rcx, _handle, args} ($($args)*));
 
                 $body
 
@@ -141,7 +141,7 @@ macro_rules! _js_unpack_args_count {
     ($name:ident: &RJSContext, $($args:tt)*) => {
         _js_unpack_args_count!($($args)*)
     };
-    ($name:ident: &RJSRemote, $($args:tt)*) => {
+    ($name:ident: &RJSHandle, $($args:tt)*) => {
         _js_unpack_args_count!($($args)*)
     };
     ($name:ident: CallArgs, $($args:tt)*) => {
@@ -172,9 +172,9 @@ macro_rules! _js_unpack_args_unwrap_args {
         let $name: &RJSContext = $rcx;
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
     };
-    // RJSRemote
-    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $name:ident : &RJSRemote, $($args:tt)*) => {
-        let $name: &RJSRemote = $remote;
+    // RJSHandle
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $name:ident : &RJSHandle, $($args:tt)*) => {
+        let $name: &RJSHandle = $remote;
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
     };
     // CallArgs

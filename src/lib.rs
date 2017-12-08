@@ -3,6 +3,7 @@
 #![feature(libc)]
 #![feature(trace_macros)]
 #![feature(fnbox)]
+#![feature(refcell_replace_swap)]
 // #![cfg(feature = "debugmozjs")]
 
 extern crate mozjs;

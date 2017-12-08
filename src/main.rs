@@ -28,8 +28,8 @@ use jsapi::JS_NewObjectForConstructor;
 //use jsapi::JSFunction;
 use jsapi::JS_CallFunctionValue;
 //use jsapi::JS_DefineFunction;
-use jsapi::JS_EncodeStringToUTF8;
-use jsapi::JS_free;
+//use jsapi::JS_EncodeStringToUTF8;
+//use jsapi::JS_free;
 use jsapi::JS_GetRuntime;
 use jsapi::JS_GetRuntimePrivate;
 use jsapi::JS_Init;
@@ -57,6 +57,8 @@ use mozjs::jsapi::JSClassOps;
 use mozjs::jsapi::JSFunctionSpec;
 use mozjs::jsapi::JSNativeWrapper;
 use mozjs::jsapi::JSPropertySpec;
+use mozjs::jsapi::HandleValue;
+use mozjs::jsapi::{Handle, MutableHandle};
 
 use std::ptr;
 use std::env;
@@ -64,16 +66,18 @@ use std::fs;
 use std::fs::File;
 use std::path::Path;
 // use std::io;
-use std::ffi::CStr;
+//use std::ffi::CStr;
 use std::str;
 use std::io::Read;
 use std::time::{Duration};
 use std::ffi::CString;
-use std::marker::PhantomData;
-use std::fmt;
-use std::fmt::Display;
+//use std::marker::PhantomData;
+//use std::fmt;
+//use std::fmt::Display;
 use std::sync::{Once, ONCE_INIT};
 use std::ops::Deref;
+use std::ops::DerefMut;
+use std::fmt::{Debug, Formatter, Error};
 
 
 
@@ -133,7 +137,7 @@ fn main() {
             unsafe { report_pending_exception(cx); }
         }
 
-        let str = String::from_jsval(cx, rval.handle(), ()).to_result().unwrap();
+        let str = unsafe { String::from_jsval(cx, rval.handle(), ()) }.to_result().unwrap();
 
         println!("script result: {}", str);
 
@@ -161,42 +165,105 @@ js_fn!{fn puts(arg: String) -> JSRet<()> {
     Ok(())
 }}
 
+pub struct Owned<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> {
+    root: *mut jsapi::Rooted<T>,
+    guard: *mut mozjs::rust::RootedGuard<'a, T>,
+}
 
-js_fn!{fn setTimeout(rcx: &RJSContext, remote: &RJSRemote, callback: JSVal, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
-    rooted!(in(rcx.cx) let callback = callback);
 
-    remote.spawn(|rcx, remote, handle| {
-        let timeout = Timeout::new(Duration::from_millis(timeout), handle).unwrap();
+impl<'a, T: 'a + Debug + mozjs::rust::RootKind + mozjs::rust::GCMethods> Debug for Owned<'a, T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        unsafe {
+            write!(f, "Owned {{ {:?} }}", *self.root)
+        }
+    }
+}
 
-        handle.spawn(
-            timeout.map_err(|_|()).and_then(move|_| {
-                remote.spawn(move|rcx, remote, handle| {
-                    rooted!(in(rcx.cx) let this_val = rcx.global.get());
-                    rooted!(in(rcx.cx) let mut rval = UndefinedValue());
+impl<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> Owned<'a, T> {
+    pub fn new<'n>(cx: *mut JSContext, t: T) -> Owned<'n, T> {
+        let root = Box::into_raw(Box::new(jsapi::Rooted::new_unrooted()));
+        let guard = Box::into_raw(Box::new(mozjs::rust::RootedGuard::new(cx, unsafe { &mut *root }, t)));
 
-                    unsafe {
-                        let ok = JS_CallFunctionValue(
-                            rcx.cx,
-                            this_val.handle(),
-                            callback.handle(),
-                            &jsapi::HandleValueArray {
-                                elements_: ptr::null_mut(),
-                                length_: 0,
-                            },
-                            rval.handle_mut());
+        let o = Owned {
+            root: root,
+            guard: guard,
+        };
+        o
+    }
 
-                        if !ok {
-                            println!("error!");
-                            report_pending_exception(rcx.cx);
-                        }
+    pub fn handle(&self) -> Handle<T> {
+        unsafe { (*self.guard).handle() }
+    }
+
+    pub fn handle_mut(&mut self) -> MutableHandle<T> {
+        unsafe { (*self.guard).handle_mut() }
+    }
+}
+
+impl<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> Deref for Owned<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { (*self.guard).deref() }
+    }
+}
+
+impl<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> DerefMut for Owned<'a, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { (*self.guard).deref_mut() }
+    }
+}
+
+
+impl<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> Drop for Owned<'a, T> {
+    fn drop(&mut self) {
+        drop(unsafe { Box::from_raw(self.guard) });
+        drop(unsafe { Box::from_raw(self.root) });
+    }
+}
+
+
+
+js_fn!{fn setTimeout(rcx: &RJSContext, handle: &RJSHandle, callback: JSVal, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
+    let callback = Owned::new(rcx.cx, callback);
+    let remote = handle.remote().clone();
+
+    let timeout = Timeout::new(Duration::from_millis(timeout), handle.core_handle()).unwrap();
+
+    let callback_ref = handle.store_new(callback);
+
+    handle.core_handle().spawn(
+        timeout.map_err(|_|()).and_then(move|_| {
+            remote.spawn(move|rcx, handle| {
+                rooted!(in(rcx.cx) let this_val = rcx.global.get());
+                rooted!(in(rcx.cx) let mut rval = UndefinedValue());
+
+                let callback = handle.retrieve(callback_ref).unwrap();
+
+                println!("setTimeout callback");
+
+                unsafe {
+                    let ok = JS_CallFunctionValue(
+                        rcx.cx,
+                        this_val.handle(),
+                        callback.handle(),
+                        &jsapi::HandleValueArray {
+                            elements_: ptr::null_mut(),
+                            length_: 0,
+                        },
+                        rval.handle_mut());
+
+                    if !ok {
+                        println!("error!");
+                        report_pending_exception(rcx.cx);
                     }
-                });
+                }
+                println!("setTimeout callback done");
+            });
 
 
-                Ok(())
-            })
-        )
-    });
+            Ok(())
+        })
+    );
 
     Ok(())
 }}
@@ -242,12 +309,13 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
 }
 
 #[derive(Debug)]
-struct RJSContext {
+pub struct RJSContext {
     cx: *mut JSContext,
     global: HandleObject,
 }
 
-pub type RJSRemote = eventloop::Handle<RJSContext>;
+pub type RJSHandle = eventloop::Handle<RJSContext>;
+pub type RJSRemote = eventloop::Remote<RJSContext>;
 
 
 
