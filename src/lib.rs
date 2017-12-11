@@ -14,6 +14,8 @@ extern crate futures;
 //#[macro_use]
 extern crate lazy_static;
 extern crate slab;
+#[macro_use]
+extern crate downcast;
 
 
 #[cfg(test)]

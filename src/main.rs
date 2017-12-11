@@ -58,7 +58,7 @@ use mozjs::jsapi::JSFunctionSpec;
 use mozjs::jsapi::JSNativeWrapper;
 use mozjs::jsapi::JSPropertySpec;
 use mozjs::jsapi::HandleValue;
-use mozjs::jsapi::{Handle, MutableHandle};
+use mozjs::jsapi::{Handle, MutableHandle, JS_InitStandardClasses};
 
 use std::ptr;
 use std::env;
@@ -110,16 +110,16 @@ fn main() {
         global: global,
     };
 
-    eventloop::run(&rcx, |handle| {
+    eventloop::run(&rt, &rcx, |handle| {
 
-        let privatebox : Box<(&RJSContext, eventloop::Handle<RJSContext>)> = Box::new((&rcx, handle));
+        let privatebox : Box<(&RJSContext, eventloop::WeakHandle<RJSContext>)> = Box::new((&rcx, handle.downgrade()));
         unsafe { JS_SetRuntimePrivate(rt.rt(), Box::into_raw(privatebox) as *mut c_void) };
 
+        let _ac = JSAutoCompartment::new(cx, global.get());
 
-        // let res = JS_InitStandardClasses(cx, global);
+        let _ = unsafe { JS_InitStandardClasses(cx, global) };
         // println!("JS_InitStandardClasses()");
 
-        let _ac = JSAutoCompartment::new(cx, global.get());
         unsafe {
             let _ = puts{}.define_on(cx, global, 0);
             let _ = setTimeout{}.define_on(cx, global, 0);
@@ -165,81 +165,26 @@ js_fn!{fn puts(arg: String) -> JSRet<()> {
     Ok(())
 }}
 
-pub struct Owned<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> {
-    root: *mut jsapi::Rooted<T>,
-    guard: *mut mozjs::rust::RootedGuard<'a, T>,
-}
-
-
-impl<'a, T: 'a + Debug + mozjs::rust::RootKind + mozjs::rust::GCMethods> Debug for Owned<'a, T> {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
-        unsafe {
-            write!(f, "Owned {{ {:?} }}", *self.root)
-        }
-    }
-}
-
-impl<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> Owned<'a, T> {
-    pub fn new<'n>(cx: *mut JSContext, t: T) -> Owned<'n, T> {
-        let root = Box::into_raw(Box::new(jsapi::Rooted::new_unrooted()));
-        let guard = Box::into_raw(Box::new(mozjs::rust::RootedGuard::new(cx, unsafe { &mut *root }, t)));
-
-        let o = Owned {
-            root: root,
-            guard: guard,
-        };
-        o
-    }
-
-    pub fn handle(&self) -> Handle<T> {
-        unsafe { (*self.guard).handle() }
-    }
-
-    pub fn handle_mut(&mut self) -> MutableHandle<T> {
-        unsafe { (*self.guard).handle_mut() }
-    }
-}
-
-impl<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> Deref for Owned<'a, T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        unsafe { (*self.guard).deref() }
-    }
-}
-
-impl<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> DerefMut for Owned<'a, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        unsafe { (*self.guard).deref_mut() }
-    }
-}
-
-
-impl<'a, T: 'a + mozjs::rust::RootKind + mozjs::rust::GCMethods> Drop for Owned<'a, T> {
-    fn drop(&mut self) {
-        drop(unsafe { Box::from_raw(self.guard) });
-        drop(unsafe { Box::from_raw(self.root) });
-    }
-}
-
-
 
 js_fn!{fn setTimeout(rcx: &RJSContext, handle: &RJSHandle, callback: JSVal, timeout: u64 {mozjs::conversions::ConversionBehavior::Default}) -> JSRet<()> {
-    let callback = Owned::new(rcx.cx, callback);
+    rooted!(in(rcx.cx) let callback = callback);
     let remote = handle.remote().clone();
 
     let timeout = Timeout::new(Duration::from_millis(timeout), handle.core_handle()).unwrap();
 
-    let callback_ref = handle.store_new(callback);
+    let callback_ref = handle.store_new(callback.get());
 
     handle.core_handle().spawn(
         timeout.map_err(|_|()).and_then(move|_| {
             remote.spawn(move|rcx, handle| {
+                let _ac = JSAutoCompartment::new(rcx.cx, rcx.global.get());
+
                 rooted!(in(rcx.cx) let this_val = rcx.global.get());
                 rooted!(in(rcx.cx) let mut rval = UndefinedValue());
 
-                let callback = handle.retrieve(callback_ref).unwrap();
+                rooted!(in(rcx.cx) let callback = handle.retrieve(callback_ref).unwrap());
 
-                println!("setTimeout callback");
+                //println!("setTimeout callback");
 
                 unsafe {
                     let ok = JS_CallFunctionValue(
@@ -257,7 +202,7 @@ js_fn!{fn setTimeout(rcx: &RJSContext, handle: &RJSHandle, callback: JSVal, time
                         report_pending_exception(rcx.cx);
                     }
                 }
-                println!("setTimeout callback done");
+                //println!("setTimeout callback done");
             });
 
 

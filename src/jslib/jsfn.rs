@@ -35,14 +35,14 @@ macro_rules! js_fn_raw {
         unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
             let args = CallArgs::from_vp(vp, argc);
             let rt = JS_GetRuntime(cx);
-            let privatebox = JS_GetRuntimePrivate(rt) as *const (&RJSContext, RJSHandle);
+            let privatebox = JS_GetRuntimePrivate(rt) as *const (&RJSContext, eventloop::WeakHandle<RJSContext>);
             let rcx = (*privatebox).0;
-            let remote = &(*privatebox).1;
+            let handle = (*privatebox).1.upgrade().unwrap();
             assert!(rcx.cx == cx);
 
             fn rustImpl($($param : $type),*) -> JSRet<$ret> $body
 
-            let result = rustImpl(rcx, remote, args);
+            let result = rustImpl(rcx, &handle, args);
             match result {
                 Ok(v) => {
                     v.to_jsval(cx, args.rval());
