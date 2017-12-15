@@ -12,16 +12,17 @@ extern crate libc;
 extern crate rjs;
 extern crate tokio_core;
 extern crate futures;
+extern crate glutin;
 
 use rjs::jslib::eventloop;
 use tokio_core::reactor::Timeout;
+use tokio_core::reactor::Core;
 use futures::future::Future;
 
 use std::os::raw::c_void;
 use mozjs::jsapi;
 use jsapi::CallArgs;
 use jsapi::CompartmentOptions;
-use jsapi::Heap;
 use jsapi::JSAutoCompartment;
 use jsapi::JSContext;
 use jsapi::JSObject;
@@ -42,6 +43,7 @@ use jsapi::{JS_NewArrayObject1, JS_SetElement};
 use jsapi::JS_SetRuntimePrivate;
 use jsapi::OnNewGlobalHookOption;
 use jsapi::Value;
+use rjs::jslib::jsclass::JSCLASS_HAS_PRIVATE;
 use mozjs::jsval;
 use jsval::JSVal;
 use jsval::{ObjectValue, UndefinedValue};
@@ -58,8 +60,11 @@ use mozjs::jsapi::JSClassOps;
 use mozjs::jsapi::JSFunctionSpec;
 use mozjs::jsapi::JSNativeWrapper;
 use mozjs::jsapi::JSPropertySpec;
-use mozjs::jsapi::HandleValue;
-use mozjs::jsapi::{Handle, MutableHandle, JS_InitStandardClasses};
+use mozjs::jsapi::{JS_GetContext, JS_SetPrivate, JS_GetPrivate, JS_InitStandardClasses};
+use futures::sync::mpsc::{unbounded, UnboundedSender, UnboundedReceiver};
+use futures::Stream;
+
+use glutin::GlContext;
 
 use std::ptr;
 use std::env;
@@ -76,9 +81,7 @@ use std::ffi::CString;
 //use std::fmt;
 //use std::fmt::Display;
 use std::sync::{Once, ONCE_INIT};
-use std::ops::Deref;
-use std::ops::DerefMut;
-use std::fmt::{Debug, Formatter, Error};
+use std::thread;
 
 
 
@@ -128,6 +131,7 @@ fn main() {
             let _ = readDir{}.define_on(cx, global, 0);
 
             Test::init_class(cx, global);
+            Window::init_class(cx, global);
         }
 
 
@@ -270,6 +274,7 @@ struct Test {
 }
 
 js_class!{ Test
+    [JSCLASS_HAS_PRIVATE]
 
     @constructor
     fn Test_constructor(rcx: &RJSContext, args: CallArgs) -> JSRet<*mut JSObject> {
@@ -288,5 +293,163 @@ js_class!{ Test
             Ok(String::from("Test prop"))
         }
     }
+
+}
+
+struct Window {
+    thread: thread::JoinHandle<()>,
+    send_msg: UnboundedSender<WindowMsg>,
+}
+
+js_class!{ Window
+    [JSCLASS_HAS_PRIVATE]
+
+    @constructor
+    fn Window_constr(rcx: &RJSContext, handle: &RJSHandle, args: CallArgs) -> JSRet<*mut JSObject> {
+        let obj = unsafe { JS_NewObjectForConstructor(rcx.cx, Window::class(), &args) };
+
+        let remote = handle.remote();
+
+        let (send_events, recv_events) = unbounded();
+        let (send_msg, recv_msg) = unbounded();
+
+        let thread = thread::spawn(move || {
+            window_thread(recv_msg, send_events);
+        });
+
+        handle.core_handle().spawn(
+            recv_events.for_each(move |event| -> Result<(), ()> {
+                println!("Window event: {:?}", &event);
+                match event {
+                    WindowEvent::Closed => (),
+                }
+
+                Ok(())
+            })
+        );
+
+
+        let window = Box::new(Window {
+            thread: thread,
+            send_msg: send_msg,
+        });
+        unsafe {
+            JS_SetPrivate(obj, Box::into_raw(window) as *mut _);
+        }
+        println!("window constructed");
+
+        Ok(obj)
+    }
+
+    fn ping(this: @this) -> JSRet<()> {
+        unsafe {
+            let win = JS_GetPrivate(this.to_object()) as *mut Window;
+
+            (*win).send_msg.unbounded_send(
+                WindowMsg::Ping
+            );
+        }
+
+        Ok(())
+    }
+
+    @op(finalize)
+    fn Window_finalize(free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
+        let rt = (*free).runtime_;
+        let cx = JS_GetContext(rt);
+
+        let private = JS_GetPrivate(this);
+        if private.is_null() {
+            return
+        }
+
+        JS_SetPrivate(this, 0 as *mut _);
+        let win = Box::from_raw(private as *mut Window);
+        win.send_msg.unbounded_send(WindowMsg::Close);
+        win.thread.join();
+        //drop(win);
+        println!("window dropped");
+    }
+}
+
+#[derive(Debug)]
+enum WindowMsg {
+    Ping,
+    Close,
+}
+
+#[derive(Debug)]
+enum WindowEvent {
+    Closed,
+}
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+fn window_thread(recv_msg: UnboundedReceiver<WindowMsg>, send_events: UnboundedSender<WindowEvent>) {
+    let mut core = Core::new().unwrap();
+
+    let mut events_loop = glutin::EventsLoop::new();
+    let window = glutin::WindowBuilder::new()
+        .with_title("RJS Window")
+        .with_dimensions(1024, 768);
+    let context = glutin::ContextBuilder::new()
+        .with_vsync(true);
+    let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
+
+    struct WindowStuff {
+        gl_window: glutin::GlWindow,
+        run: bool,
+    }
+
+    // This could just be a let mut if tokio used lifetimes
+    let stuff = Rc::new(RefCell::new(WindowStuff {
+        gl_window: gl_window,
+        run: true,
+    }));
+
+    {
+        let stuff = stuff.clone(); // grrr. Why no clone closures?
+        core.handle().spawn(
+            recv_msg.for_each(move |msg| -> Result<(), ()> {
+                println!("Window msg: {:?}", &msg);
+                let mut stuff = stuff.borrow_mut();
+                let stuff = &mut *stuff;
+                match msg {
+                    WindowMsg::Ping => { println!("ping"); },
+                    WindowMsg::Close => {
+                        stuff.run = false;
+                        stuff.gl_window.hide();
+                    },
+                }
+
+                Ok(())
+            })
+        );
+    }
+
+    while (*stuff.borrow()).run {
+        core.turn(Some(Duration::from_millis(16)));
+
+        let mut stuff = stuff.borrow_mut();
+        let stuff = &mut *stuff;
+        events_loop.poll_events(|event| {
+            println!("glutin event: {:?}", event);
+            match event {
+                glutin::Event::WindowEvent { event, .. } => match event {
+                    glutin::WindowEvent::Closed => {
+                        stuff.run = false;
+                        stuff.gl_window.hide();
+                        send_events.unbounded_send(WindowEvent::Closed);
+                    },
+                    glutin::WindowEvent::Resized(w, h) => stuff.gl_window.resize(w, h),
+                    _ => ()
+                },
+                _ => ()
+            }
+        })
+    }
+
+    println!("window_thread exiting");
 
 }

@@ -22,6 +22,7 @@ use libc::c_uint;
 use std::ptr;
 //use std::sync::Mutex;
 
+pub const JSCLASS_HAS_PRIVATE: c_uint = 1 << 0;
 pub const fn jsclass_has_reserved_slots(n: c_uint) -> c_uint {
     (n & JSCLASS_RESERVED_SLOTS_MASK) << JSCLASS_RESERVED_SLOTS_SHIFT
 }
@@ -98,18 +99,16 @@ macro_rules! compute_once {
 }
 #[macro_export]
 macro_rules! js_class {
-    ($name:ident $($body:tt)*) => {
-        trace_macros!{true}
-        __jsclass_parse!{$name [] [] [] [] $($body)*}
+
+    ($name:ident [$flags:expr] $($body:tt)*) => {
+        //trace_macros!{true}
+        __jsclass_parse!{$name [$flags] [] [] [] [] $($body)*}
     };
 }
 
 #[macro_export]
 macro_rules! __jsclass_parsed {
-    ($name:ident [$($constr:tt)*] [$($fns:tt)*] [$($ops:tt)*] [$($props:tt)*]) => {
-        //trace_macros!{true}
-
-//pub struct $name;
+    ($name:ident [$flags:expr] [$($constr:tt)*] [$($fns:tt)*] [$($ops:tt)*] [$($props:tt)*]) => {
 
 $( __jsclass_toplevel!{_constr $constr} )*
 $( __jsclass_toplevel!{_fn $fns} )*
@@ -124,7 +123,7 @@ impl JSClassInitializer for $name {
             {
                 Box::into_raw(Box::new( JSClass {
                     name: CString::new(stringify!($name)).unwrap().into_raw(),
-                    flags: jsclass_has_reserved_slots(2),
+                    flags: $flags,
                     cOps: __jsclass_ops!([] $($ops)*),
                     reserved: [0 as *mut _; 3],
                 }))
@@ -190,33 +189,33 @@ macro_rules! nothing {
 
 #[macro_export]
 macro_rules! __jsclass_parse {
-    ($cname:ident $constr:tt $fns:tt $ops:tt $props:tt ) => {
-        __jsclass_parsed!{$cname $constr $fns $ops $props}
+    ($cname:ident $flags:tt $constr:tt $fns:tt $ops:tt $props:tt ) => {
+        __jsclass_parsed!{$cname $flags $constr $fns $ops $props}
     };
-    ($cname:ident $constr:tt [$($fns:tt)*] $ops:tt $props:tt
+    ($cname:ident $flags:tt $constr:tt [$($fns:tt)*] $ops:tt $props:tt
      fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname $constr [$($fns)*
+        __jsclass_parse!{$cname $flags $constr [$($fns)*
             [fn $name $args -> JSRet<$ret> { $($body)* }]
         ] $ops $props
         $($rest)*}
     };
-    ($cname:ident [$($constr:tt)*] $fns:tt $ops:tt $props:tt
+    ($cname:ident $flags:tt [$($constr:tt)*] $fns:tt $ops:tt $props:tt
      @constructor fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname [$($constr)*
+        __jsclass_parse!{$cname $flags [$($constr)*
             [fn $name $args -> JSRet<$ret> { $($body)* }]
         ] $fns $ops $props
         $($rest)*}
     };
-    ($cname:ident $constr:tt $fns:tt [$($ops:tt)*] $props:tt
+    ($cname:ident $flags:tt $constr:tt $fns:tt [$($ops:tt)*] $props:tt
      @op($op:ident) fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname $constr $fns [$($ops)*
+        __jsclass_parse!{$cname $flags $constr $fns [$($ops)*
             [$op fn $name $args -> $ret { $($body)* }]
         ] $props
         $($rest)*}
     };
-    ($cname:ident $constr:tt $fns:tt $ops:tt [$($props:tt)*]
+    ($cname:ident $flags:tt $constr:tt $fns:tt $ops:tt [$($props:tt)*]
      @prop $name:ident $body:tt $($rest:tt)*) => {
-        __jsclass_parse!{$cname $constr $fns $ops [$($props)*
+        __jsclass_parse!{$cname $flags $constr $fns $ops [$($props)*
             [$name $body]
         ]
         $($rest)*}
@@ -225,7 +224,9 @@ macro_rules! __jsclass_parse {
 
 #[macro_export]
 macro_rules! __jsclass_ops {
-    ([] $($body:tt)*) => { __jsclass_ops!{[{None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}] $($body)* } };
+    ([] $($body:tt)*) => {
+        __jsclass_ops!{[{None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}] $($body)* }
+    };
 
     ([$ap:tt, $ca:tt, $co:tt, $dp:tt, $e:tt, $f:tt, $gp:tt, $hi:tt, $mr:tt, $r:tt, $sp:tt, $t:tt] ) => {
         &JSClassOps {
@@ -255,7 +256,17 @@ macro_rules! __jsclass_ops {
     };
     (
         [$ap:tt, $ca:tt, $co:tt, $dp:tt, $e:tt, $f:tt, $gp:tt, $hi:tt, $mr:tt, $r:tt, $sp:tt, $t:tt]
-        [_op [call fn $fname:ident $args:tt -> $ret:ty { $($fbody:tt)* }]]
+        [finalize fn $fname:ident $args:tt -> $ret:ty { $($fbody:tt)* }]
+         $($body:tt)*
+     ) => {
+        __jsclass_ops!{
+            [$ap, $ca, $co, $dp, $e, {Some($fname)}, $gp, $hi, $mr, $r, $sp, $t]
+            $($body)*
+        }
+    };
+    (
+        [$ap:tt, $ca:tt, $co:tt, $dp:tt, $e:tt, $f:tt, $gp:tt, $hi:tt, $mr:tt, $r:tt, $sp:tt, $t:tt]
+        [call fn $fname:ident $args:tt -> $ret:ty { $($fbody:tt)* }]
          $($body:tt)*
      ) => {
         __jsclass_ops!{
@@ -265,10 +276,10 @@ macro_rules! __jsclass_ops {
     };
     (
         [$ap:tt, $ca:tt, $co:tt, $dp:tt, $e:tt, $f:tt, $gp:tt, $hi:tt, $mr:tt, $r:tt, $sp:tt, $t:tt]
-        [_op [$oname:ident fn $fname:ident $args:tt -> $ret:ty { $($fbody:tt)* }]]
+        [$oname:ident fn $fname:ident $args:tt -> $ret:ty { $($fbody:tt)* }]
          $($body:tt)*
      ) => {
-        compile_error!("Bad op name")
+        compile_error!("Bad op name" + stringify!($oname))
     };
     (
         $ops:tt
@@ -313,6 +324,10 @@ macro_rules! __jsclass_toplevel {
     };
     (_constr [ fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} ]) => {
         js_fn!{fn $name $args -> JSRet<$ret> { $($body)* } }
+    };
+    (_op [$oname:ident fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} ]) => {
+        #[allow(non_snake_case)]
+        unsafe extern "C" fn $name $args -> $ret { $($body)* }
     };
     (_prop [ $name:ident {} ]) => {};
     (_prop [ $name:ident { get fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ] ) => {

@@ -16,6 +16,8 @@ futures = "0.1"
 lazy_static = "1.0.0"
 slab = "0.4.0"
 downcast = "0.9.1"
+glutin = "*"
+gl = "*"
 
 [package.metadata.android]
 label = "Using assets android-rs-glue example"
