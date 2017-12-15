@@ -13,6 +13,7 @@ extern crate rjs;
 extern crate tokio_core;
 extern crate futures;
 extern crate glutin;
+extern crate gl;
 
 use rjs::jslib::eventloop;
 use tokio_core::reactor::Timeout;
@@ -187,7 +188,7 @@ js_fn!{fn setTimeout(rcx: &RJSContext, handle: &RJSHandle, callback: JSVal, time
                 rooted!(in(rcx.cx) let this_val = rcx.global.get());
                 rooted!(in(rcx.cx) let mut rval = UndefinedValue());
 
-                rooted!(in(rcx.cx) let callback = handle.retrieve(callback_ref).unwrap());
+                rooted!(in(rcx.cx) let callback = handle.retrieve(&callback_ref).unwrap());
 
                 //println!("setTimeout callback");
 
@@ -308,6 +309,7 @@ js_class!{ Window
     fn Window_constr(rcx: &RJSContext, handle: &RJSHandle, args: CallArgs) -> JSRet<*mut JSObject> {
         let obj = unsafe { JS_NewObjectForConstructor(rcx.cx, Window::class(), &args) };
 
+        let handle = handle.clone();
         let remote = handle.remote();
 
         let (send_events, recv_events) = unbounded();
@@ -317,16 +319,23 @@ js_class!{ Window
             window_thread(recv_msg, send_events);
         });
 
-        handle.core_handle().spawn(
-            recv_events.for_each(move |event| -> Result<(), ()> {
-                println!("Window event: {:?}", &event);
-                match event {
-                    WindowEvent::Closed => (),
-                }
+        {
+            let handle2 = handle.clone();
+            let handle = Rc::new(RefCell::new(handle.clone()));
+            //let obj = handle2.store_new(obj);
+            handle2.core_handle().spawn(
+                recv_events.for_each(move |event| -> Result<(), ()> {
+                    println!("Window event: {:?}", &event);
+                    let h: &RJSHandle = &handle.borrow();
+                    //let obj = handle.retrieve_copy(&obj);
+                    match event {
+                        WindowEvent::Closed => (),
+                    }
 
-                Ok(())
-            })
-        );
+                    Ok(())
+                })
+            );
+        }
 
 
         let window = Box::new(Window {
@@ -347,6 +356,18 @@ js_class!{ Window
 
             (*win).send_msg.unbounded_send(
                 WindowMsg::Ping
+            );
+        }
+
+        Ok(())
+    }
+
+    fn close(this: @this) -> JSRet<()> {
+        unsafe {
+            let win = JS_GetPrivate(this.to_object()) as *mut Window;
+
+            (*win).send_msg.unbounded_send(
+                WindowMsg::Close
             );
         }
 
@@ -397,6 +418,12 @@ fn window_thread(recv_msg: UnboundedReceiver<WindowMsg>, send_events: UnboundedS
         .with_vsync(true);
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
 
+    unsafe {
+        gl_window.make_current().unwrap();
+        gl::load_with(|symbol| gl_window.get_proc_address(symbol) as *const _);
+        gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+    }
+
     struct WindowStuff {
         gl_window: glutin::GlWindow,
         run: bool,
@@ -433,6 +460,12 @@ fn window_thread(recv_msg: UnboundedReceiver<WindowMsg>, send_events: UnboundedS
 
         let mut stuff = stuff.borrow_mut();
         let stuff = &mut *stuff;
+
+        unsafe {
+            gl::Clear(gl::COLOR_BUFFER_BIT);
+        }
+        stuff.gl_window.swap_buffers().unwrap();
+
         events_loop.poll_events(|event| {
             println!("glutin event: {:?}", event);
             match event {

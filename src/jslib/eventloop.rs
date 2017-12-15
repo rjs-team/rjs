@@ -196,7 +196,7 @@ impl<T> Handle<T> {
         }
     }
 
-    pub fn retrieve<V: Debug + 'static>(&self, rref: RemoteRef<V>) -> Option<V> {
+    pub fn retrieve<V: Debug + 'static>(&self, rref: &RemoteRef<V>) -> Option<V> {
         let slab = self.slab.upgrade().unwrap();
         let slab = slab.borrow();
         let r = unsafe { slab.get_unchecked(rref.key) };
@@ -205,6 +205,22 @@ impl<T> Handle<T> {
             let b: Box<V> = unsafe { p.downcast_unchecked::<V>() };
             *b
         }); 
+        //println!("retrieved: {:?}", val);
+        val
+    }
+
+    pub fn retrieve_copy<V: Copy + 'static>(&self, rref: &RemoteRef<V>) -> Option<V> {
+        let slab = self.slab.upgrade().unwrap();
+        let slab = slab.borrow();
+        let r = unsafe { slab.get_unchecked(rref.key) };
+        let o = &*r.borrow();
+        let val = match o {
+            &None => None,
+            &Some(ref p) => {
+                let v: &V = unsafe { p.downcast_ref_unchecked::<V>() };
+                Some(*v)
+            },
+        };
         //println!("retrieved: {:?}", val);
         val
     }
