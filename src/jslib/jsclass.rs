@@ -96,15 +96,25 @@ macro_rules! compute_once {
         }
     }
 }
-
 #[macro_export]
 macro_rules! js_class {
     ($name:ident $($body:tt)*) => {
+        trace_macros!{true}
+        __jsclass_parse!{$name [] [] [] [] $($body)*}
+    };
+}
+
+#[macro_export]
+macro_rules! __jsclass_parsed {
+    ($name:ident [$($constr:tt)*] [$($fns:tt)*] [$($ops:tt)*] [$($props:tt)*]) => {
         //trace_macros!{true}
 
 //pub struct $name;
 
-__jsclass_foreach!{{__jsclass_function, nothing, __jsclass_property, __jsclass_function} {} $($body)*}
+$( __jsclass_toplevel!{_constr $constr} )*
+$( __jsclass_toplevel!{_fn $fns} )*
+$( __jsclass_toplevel!{_op $ops} )*
+$( __jsclass_toplevel!{_prop $props} )*
 
 
 impl JSClassInitializer for $name {
@@ -115,20 +125,7 @@ impl JSClassInitializer for $name {
                 Box::into_raw(Box::new( JSClass {
                     name: CString::new(stringify!($name)).unwrap().into_raw(),
                     flags: jsclass_has_reserved_slots(2),
-                    cOps: &JSClassOps {
-                        addProperty: None,
-                        call: None,
-                        construct: None,
-                        delProperty: None,
-                        enumerate: None,
-                        finalize: None,
-                        getProperty: None,
-                        hasInstance: None,
-                        mayResolve: None,
-                        resolve: None,
-                        setProperty: None,
-                        trace: None,
-                    },
+                    cOps: __jsclass_ops!([] $($ops)*),
                     reserved: [0 as *mut _; 3],
                 }))
             }
@@ -137,7 +134,9 @@ impl JSClassInitializer for $name {
 
     fn constr() -> Option<Box<RJSFn>> {
 
-        __jsclass_foreach!{{__jsclass_constrspec, nothing, nothing, nothing} {} $($body)*}
+        $(
+            __jsclass_constrspec!{$constr}
+        )*
 
         #[allow(unreachable_code)]
         None
@@ -149,7 +148,9 @@ impl JSClassInitializer for $name {
             {
                 let mut fspecs: Vec<JSFunctionSpec> = vec![];
 
-                __jsclass_foreach!{{nothing, nothing, nothing, __jsclass_functionspec} {fspecs} $($body)*};
+                $(
+                    __jsclass_functionspec!{fspecs $fns}
+                )*
                 fspecs.push(null_function());
 
                 let fboxptr = Box::into_raw(fspecs.into_boxed_slice());
@@ -164,7 +165,9 @@ impl JSClassInitializer for $name {
             {
                 let mut pspecs: Vec<JSPropertySpec> = vec![];
 
-                __jsclass_foreach!{{nothing, nothing, __jsclass_propertyspec, nothing} {pspecs} $($body)*};
+                $(
+                    __jsclass_propertyspec!{pspecs $props}
+                )*
                 pspecs.push(null_property());
 
                 let pboxptr = Box::into_raw(pspecs.into_boxed_slice());
@@ -184,37 +187,109 @@ macro_rules! nothing {
     ($($any:tt)*) => {}
 }
 
+
 #[macro_export]
-macro_rules! __jsclass_foreach {
-    ($ms:tt $margs:tt ) => { };
-    ({$mconstr:ident, $mop:ident, $mprop:ident, $mfn:ident} $margs:tt  fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        $mfn!{$margs fn $name $args -> JSRet<$ret> { $($body)* }}
-        __jsclass_foreach!{{$mconstr, $mop, $mprop, $mfn} $margs $($rest)*}
+macro_rules! __jsclass_parse {
+    ($cname:ident $constr:tt $fns:tt $ops:tt $props:tt ) => {
+        __jsclass_parsed!{$cname $constr $fns $ops $props}
     };
-    ({$mconstr:ident, $mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @constructor fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        $mconstr!{$margs fn $name $args -> JSRet<$ret> { $($body)* }}
-        __jsclass_foreach!{{$mconstr, $mop, $mprop, $mfn} $margs $($rest)*}
+    ($cname:ident $constr:tt [$($fns:tt)*] $ops:tt $props:tt
+     fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
+        __jsclass_parse!{$cname $constr [$($fns)*
+            [fn $name $args -> JSRet<$ret> { $($body)* }]
+        ] $ops $props
+        $($rest)*}
     };
-    ({$mconstr:ident, $mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @op($op:ident) fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
-        $mop!{$margs $op fn $name $args -> $ret { $($body)* }}
-        __jsclass_foreach!{{$mconstr, $mop, $mprop, $mfn} $margs $($rest)*}
+    ($cname:ident [$($constr:tt)*] $fns:tt $ops:tt $props:tt
+     @constructor fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
+        __jsclass_parse!{$cname [$($constr)*
+            [fn $name $args -> JSRet<$ret> { $($body)* }]
+        ] $fns $ops $props
+        $($rest)*}
     };
-    ({$mconstr:ident, $mop:ident, $mprop:ident, $mfn:ident} $margs:tt  @prop $name:ident $body:tt $($rest:tt)*) => {
-        $mprop!{$margs @prop $name $body }
-        __jsclass_foreach!{{$mconstr, $mop, $mprop, $mfn} $margs $($rest)*}
+    ($cname:ident $constr:tt $fns:tt [$($ops:tt)*] $props:tt
+     @op($op:ident) fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
+        __jsclass_parse!{$cname $constr $fns [$($ops)*
+            [$op fn $name $args -> $ret { $($body)* }]
+        ] $props
+        $($rest)*}
+    };
+    ($cname:ident $constr:tt $fns:tt $ops:tt [$($props:tt)*]
+     @prop $name:ident $body:tt $($rest:tt)*) => {
+        __jsclass_parse!{$cname $constr $fns $ops [$($props)*
+            [$name $body]
+        ]
+        $($rest)*}
     };
 }
 
 #[macro_export]
+macro_rules! __jsclass_ops {
+    ([] $($body:tt)*) => { __jsclass_ops!{[{None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}, {None}] $($body)* } };
+
+    ([$ap:tt, $ca:tt, $co:tt, $dp:tt, $e:tt, $f:tt, $gp:tt, $hi:tt, $mr:tt, $r:tt, $sp:tt, $t:tt] ) => {
+        &JSClassOps {
+            addProperty: $ap,
+            call: $ca,
+            construct: $co,
+            delProperty: $dp,
+            enumerate: $e,
+            finalize: $f,
+            getProperty: $gp,
+            hasInstance: $hi,
+            mayResolve: $mr,
+            resolve: $r,
+            setProperty: $sp,
+            trace: $t,
+        }
+    };
+    (
+        [$ap:tt, $ca:tt, $co:tt, $dp:tt, $e:tt, $f:tt, $gp:tt, $hi:tt, $mr:tt, $r:tt, $sp:tt, $t:tt]
+        [_op [addProperty fn $fname:ident $args:tt -> $ret:ty { $($fbody:tt)* }]]
+         $($body:tt)*
+     ) => {
+        __jsclass_ops!{
+            [{Some($fname)}, $ca, $co, $dp, $e, $f, $gp, $hi, $mr, $r, $sp, $t]
+            $($body)*
+        }
+    };
+    (
+        [$ap:tt, $ca:tt, $co:tt, $dp:tt, $e:tt, $f:tt, $gp:tt, $hi:tt, $mr:tt, $r:tt, $sp:tt, $t:tt]
+        [_op [call fn $fname:ident $args:tt -> $ret:ty { $($fbody:tt)* }]]
+         $($body:tt)*
+     ) => {
+        __jsclass_ops!{
+            [$ap, {Some($fname)}, $co, $dp, $e, $f, $gp, $hi, $mr, $r, $sp, $t]
+            $($body)*
+        }
+    };
+    (
+        [$ap:tt, $ca:tt, $co:tt, $dp:tt, $e:tt, $f:tt, $gp:tt, $hi:tt, $mr:tt, $r:tt, $sp:tt, $t:tt]
+        [_op [$oname:ident fn $fname:ident $args:tt -> $ret:ty { $($fbody:tt)* }]]
+         $($body:tt)*
+     ) => {
+        compile_error!("Bad op name")
+    };
+    (
+        $ops:tt
+        [$cname:ident $cbody:tt]
+         $($body:tt)*
+     ) => {
+        __jsclass_ops!{$ops $($body)* }
+    };
+}
+
+
+#[macro_export]
 macro_rules! __jsclass_constrspec {
-    ({} fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}) => {
+    ([fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}]) => {
         return Some(Box::new($name{}));
     };
 }
 
 #[macro_export]
 macro_rules! __jsclass_functionspec {
-    ({$vec:ident} fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}) => {
+    ($vec:ident [fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}]) => {
         $vec.push(
             JSFunctionSpec {
                 //name: b"log\0" as *const u8 as *const c_char,
@@ -232,15 +307,27 @@ macro_rules! __jsclass_functionspec {
 }
 
 #[macro_export]
-macro_rules! __jsclass_function {
-    ({} fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}) => {
+macro_rules! __jsclass_toplevel {
+    (_fn [ fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} ]) => {
         js_fn!{fn $name $args -> JSRet<$ret> { $($body)* } }
+    };
+    (_constr [ fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} ]) => {
+        js_fn!{fn $name $args -> JSRet<$ret> { $($body)* } }
+    };
+    (_prop [ $name:ident {} ]) => {};
+    (_prop [ $name:ident { get fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ] ) => {
+        js_fn!{fn $fname $args -> JSRet<$ret> { $($body)* } }
+        __jsclass_toplevel!{_prop [ $name { $($rest)* } ]}
+    };
+    (_prop [ $name:ident { set fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ] ) => {
+        js_fn!{fn $fname $args -> JSRet<$ret> { $($body)* } }
+        __jsclass_toplevel!{_prop [ $name { $($rest)* } ]}
     };
 }
 
 #[macro_export]
 macro_rules! __jsclass_propertyspec {
-    ({$vec:ident} @prop $name:ident {$($rest:tt)*}) => {
+    ($vec:ident [$name:ident {$($rest:tt)*}]) => {
         __jsclass_propertyspec!{{$vec, null_wrapper(), null_wrapper()} @prop $name { $($rest)* }}
     };
     ({$vec:ident, $getter:expr, $setter:expr} @prop $name:ident {}) => {
@@ -263,17 +350,3 @@ macro_rules! __jsclass_propertyspec {
     };
 }
 
-#[macro_export]
-macro_rules! __jsclass_property {
-    ({} @prop $name:ident {}) => {
-    };
-
-    ({} @prop $name:ident { get fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
-        js_fn!{fn $fname $args -> JSRet<$ret> { $($body)* } }
-        __jsclass_property!{{} @prop $name { $($rest)* }}
-    };
-    ({} @prop $name:ident { set fn $fname:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)* } ) => {
-        js_fn!{fn $fname $args -> JSRet<$ret> { $($body)* } }
-        __jsclass_property!{{} @prop $name { $($rest)* }}
-    };
-}

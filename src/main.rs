@@ -2,6 +2,7 @@
 #![feature(const_fn)]
 #![feature(libc)]
 #![feature(trace_macros)]
+#![recursion_limit="10000"]
 // #![cfg(feature = "debugmozjs")]
 
 #[macro_use]
