@@ -136,11 +136,20 @@ pub fn run<T, F>(rt: &Runtime, t: &T, first: F)
     }
 }
 
-#[derive(Clone)]
 pub struct Handle<T> {
     remote: Remote<T>,
     thandle: tokio::Handle,
     slab: rc::Weak<RefCell<Slab<RefSlabEl>>>,
+}
+
+impl<T> Clone for Handle<T> {
+    fn clone(&self) -> Self {
+        Handle {
+            remote: self.remote.clone(),
+            thandle: self.thandle.clone(),
+            slab: self.slab.clone(),
+        }
+    }
 }
 
 impl<T> Handle<T> {

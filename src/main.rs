@@ -309,7 +309,7 @@ js_class!{ Window
     fn Window_constr(rcx: &RJSContext, handle: &RJSHandle, args: CallArgs) -> JSRet<*mut JSObject> {
         let obj = unsafe { JS_NewObjectForConstructor(rcx.cx, Window::class(), &args) };
 
-        let handle = handle.clone();
+        let handle: RJSHandle = (*handle).clone();
         let remote = handle.remote();
 
         let (send_events, recv_events) = unbounded();
@@ -348,6 +348,7 @@ js_class!{ Window
         println!("window constructed");
 
         Ok(obj)
+
     }
 
     fn ping(this: @this) -> JSRet<()> {
