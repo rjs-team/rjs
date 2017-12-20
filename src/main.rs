@@ -314,7 +314,7 @@ js_class!{ Test
 
 struct Window {
     thread: thread::JoinHandle<()>,
-    send_msg: UnboundedSender<WindowMsg>,
+    send_msg: mpsc::UnboundedSender<WindowMsg>,
 }
 
 impl Window {
