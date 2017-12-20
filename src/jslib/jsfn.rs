@@ -1,14 +1,18 @@
 use mozjs::jsapi::JSContext;
-use mozjs::jsapi::JSNative;
 use mozjs::jsapi::JSFunction;
 use mozjs::jsapi::JS_DefineFunction;
 use mozjs::jsapi::Value;
 use mozjs::jsapi::HandleObject;
 use mozjs::conversions::ToJSValConvertible;
 
+use ::jslib::eventloop;
+use ::jslib::context::{RJSContext};
+
 use libc;
-use libc::c_uint;
+//use libc::c_uint;
 use std::ffi::CString;
+
+pub type RuntimePrivate = eventloop::WeakHandle<RJSContext>;
 
 pub type JSRet<T: ToJSValConvertible> = Result<T, Option<String>>;
 
@@ -35,9 +39,9 @@ macro_rules! js_fn_raw {
         unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
             let args = CallArgs::from_vp(vp, argc);
             let rt = JS_GetRuntime(cx);
-            let privatebox = JS_GetRuntimePrivate(rt) as *const (&RJSContext, eventloop::WeakHandle<RJSContext>);
-            let rcx = (*privatebox).0;
-            let handle = (*privatebox).1.upgrade().unwrap();
+            let privatebox = JS_GetRuntimePrivate(rt) as *const $crate::jslib::jsfn::RuntimePrivate;
+            let handle = (*privatebox).upgrade().unwrap();
+            let rcx = handle.get();
             assert!(rcx.cx == cx);
 
             fn rustImpl($($param : $type),*) -> JSRet<$ret> $body

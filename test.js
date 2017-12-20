@@ -23,15 +23,32 @@ puts("Globals: " + Object.keys(this));
 
 let window;
 
+function changeClear() {
+  if (!window) return;
+
+  window.clearColor(1, 0, 0, 1);
+  window.clear();
+}
+
+function ping() {
+  if (window) window.ping();
+  else return puts("puts: window == null");
+
+  setTimeout(ping, 500);
+}
+
 setTimeout(function() {
   window = new Window();
-  window.ping();
+  ping();
+  setTimeout(changeClear, 1000);
+
   setTimeout(function() {
-    puts("Wait over...");
-    window = null;
+    puts("Wait over... closing...");
+    window.close();
 
     setTimeout(function() {
       puts("Second wait...");
+      window = null;
     }, 10000);
   }, 10000);
 }, 1000);

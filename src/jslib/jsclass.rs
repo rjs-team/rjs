@@ -97,18 +97,26 @@ macro_rules! compute_once {
         }
     }
 }
+
+#[macro_export]
+macro_rules! c_str {
+    ($str:expr) => {
+        concat!($str, "\0").as_ptr() as *const ::std::os::raw::c_char
+    }
+}
+
 #[macro_export]
 macro_rules! js_class {
 
     ($name:ident [$flags:expr] $($body:tt)*) => {
         //trace_macros!{true}
-        __jsclass_parse!{$name [$flags] [] [] [] [] $($body)*}
+        __jsclass_parse!{$name [$flags] [()] [] [] [] [] $($body)*}
     };
 }
 
 #[macro_export]
 macro_rules! __jsclass_parsed {
-    ($name:ident [$flags:expr] [$($constr:tt)*] [$($fns:tt)*] [$($ops:tt)*] [$($props:tt)*]) => {
+    ($name:ident [$flags:expr] [$private:ty] [$($constr:tt)*] [$($fns:tt)*] [$($ops:tt)*] [$($props:tt)*]) => {
 
 $( __jsclass_toplevel!{_constr $constr} )*
 $( __jsclass_toplevel!{_fn $fns} )*
@@ -116,13 +124,28 @@ $( __jsclass_toplevel!{_op $ops} )*
 $( __jsclass_toplevel!{_prop $props} )*
 
 
+impl $name {
+
+    fn get_private(cx: *mut JSContext, obj: Handle<*mut JSObject>, args: &mut CallArgs) -> Option<*mut $private> {
+        unsafe {
+            let ptr = JS_GetInstancePrivate(cx, obj, Self::class(), args as *mut CallArgs) as *mut $private;
+            if ptr.is_null() {
+                None
+            } else {
+                Some(ptr)
+            }
+        }
+    }
+}
+
 impl JSClassInitializer for $name {
     fn class() -> *const JSClass {
         compute_once!{
             *const JSClass = ptr::null();
             {
                 Box::into_raw(Box::new( JSClass {
-                    name: CString::new(stringify!($name)).unwrap().into_raw(),
+                    //name: CString::new(stringify!($name)).unwrap().into_raw(),
+                    name: c_str!(stringify!($name)),
                     flags: $flags,
                     cOps: __jsclass_ops!([] $($ops)*),
                     reserved: [0 as *mut _; 3],
@@ -130,6 +153,7 @@ impl JSClassInitializer for $name {
             }
         }
     }
+
 
     fn constr() -> Option<Box<RJSFn>> {
 
@@ -189,33 +213,38 @@ macro_rules! nothing {
 
 #[macro_export]
 macro_rules! __jsclass_parse {
-    ($cname:ident $flags:tt $constr:tt $fns:tt $ops:tt $props:tt ) => {
-        __jsclass_parsed!{$cname $flags $constr $fns $ops $props}
+    ($cname:ident $flags:tt $private:tt $constr:tt $fns:tt $ops:tt $props:tt ) => {
+        __jsclass_parsed!{$cname $flags $private $constr $fns $ops $props}
     };
-    ($cname:ident $flags:tt $constr:tt [$($fns:tt)*] $ops:tt $props:tt
+    ($cname:ident $flags:tt [$private:ty] $constr:tt $fns:tt $ops:tt $props:tt
+     private: $ty:ty, $($rest:tt)*) => {
+        __jsclass_parse!{$cname $flags [$ty] $constr $fns $ops $props
+        $($rest)*}
+    };
+    ($cname:ident $flags:tt $private:tt $constr:tt [$($fns:tt)*] $ops:tt $props:tt
      fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags $constr [$($fns)*
+        __jsclass_parse!{$cname $flags $private $constr [$($fns)*
             [fn $name $args -> JSRet<$ret> { $($body)* }]
         ] $ops $props
         $($rest)*}
     };
-    ($cname:ident $flags:tt [$($constr:tt)*] $fns:tt $ops:tt $props:tt
+    ($cname:ident $flags:tt $private:tt [$($constr:tt)*] $fns:tt $ops:tt $props:tt
      @constructor fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags [$($constr)*
+        __jsclass_parse!{$cname $flags $private [$($constr)*
             [fn $name $args -> JSRet<$ret> { $($body)* }]
         ] $fns $ops $props
         $($rest)*}
     };
-    ($cname:ident $flags:tt $constr:tt $fns:tt [$($ops:tt)*] $props:tt
+    ($cname:ident $flags:tt $private:tt $constr:tt $fns:tt [$($ops:tt)*] $props:tt
      @op($op:ident) fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags $constr $fns [$($ops)*
+        __jsclass_parse!{$cname $flags $private $constr $fns [$($ops)*
             [$op fn $name $args -> $ret { $($body)* }]
         ] $props
         $($rest)*}
     };
-    ($cname:ident $flags:tt $constr:tt $fns:tt $ops:tt [$($props:tt)*]
+    ($cname:ident $flags:tt $private:tt $constr:tt $fns:tt $ops:tt [$($props:tt)*]
      @prop $name:ident $body:tt $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags $constr $fns $ops [$($props)*
+        __jsclass_parse!{$cname $flags $private $constr $fns $ops [$($props)*
             [$name $body]
         ]
         $($rest)*}
@@ -304,7 +333,8 @@ macro_rules! __jsclass_functionspec {
         $vec.push(
             JSFunctionSpec {
                 //name: b"log\0" as *const u8 as *const c_char,
-                name: CString::new(stringify!($name)).unwrap().into_raw(),
+                //name: CString::new(stringify!($name)).unwrap().into_raw(),
+                name: concat!(stringify!($name), "\0").as_ptr() as *const ::std::os::raw::c_char,
                 selfHostedName: ptr::null(),
                 flags: JSPROP_ENUMERATE as u16,
                 nargs: $name{}.nargs() as u16,
@@ -349,7 +379,8 @@ macro_rules! __jsclass_propertyspec {
         $vec.push(
             JSPropertySpec {
                 //name: b"window\0" as *const u8 as *const c_char,
-                name: CString::new(stringify!($name)).unwrap().into_raw(),
+                //name: CString::new(stringify!($name)).unwrap().into_raw(),
+                name: concat!(stringify!($name), "\0").as_ptr() as *const ::std::os::raw::c_char,
                 flags: (JSPROP_ENUMERATE | JSPROP_SHARED) as u8,
                 getter: $getter,
                 setter: $setter,

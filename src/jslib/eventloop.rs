@@ -1,35 +1,26 @@
 
 extern crate tokio_core;
-// extern crate tokio_timer;
 extern crate futures;
 
 use tokio_core::reactor as tokio;
 use futures::Future;
 use futures::future;
 use futures::Stream;
-use futures::IntoFuture;
-// use futures::future::{FutureResult};
-// use tokio_timer::{Timer, TimerError};
 use futures::sync::oneshot;
 use futures::sync::mpsc;
-use futures::sync::mpsc::UnboundedSender;
-//use futures::future::IntoFuture;
 
-//use std::ops::Deref;
 use std::sync::{Arc, Weak};
 use std::rc;
 use std::rc::Rc;
-//use std::boxed::FnBox;
 use std::clone::Clone;
 use std::marker::PhantomData;
 use slab::Slab;
-use std::cell::{RefCell, Ref, RefMut};
+use std::cell::{RefCell};
 use std::fmt::Debug;
 use downcast::Any;
 use mozjs::rust::{Trace, GCMethods, Runtime};
 use mozjs::jsapi::{JSTracer, Heap};
 use mozjs::jsapi::{ JS_AddExtraGCRootsTracer, JS_RemoveExtraGCRootsTracer };
-use mozjs::jsapi::JSRuntime;
 use mozjs::jsapi::{JS_GC, GCForReason, JSGCInvocationKind, Reason, JSAutoCompartment, CurrentGlobalOrNull};
 
 use std::os::raw::c_void;
@@ -87,7 +78,7 @@ unsafe extern "C" fn ref_slab_tracer(trc: *mut JSTracer, data: *mut c_void) {
     //println!("ref_slab_tracer: {}", count);
 }
 
-pub fn run<T, F>(rt: &Runtime, t: &T, first: F)
+pub fn run<T, F>(rt: &Runtime, t: T, first: F)
     where T: Sized,
           F: FnOnce(Handle<T>) -> ()
 {
@@ -100,10 +91,13 @@ pub fn run<T, F>(rt: &Runtime, t: &T, first: F)
 
     let core_handle = core.handle();
 
+    let data = rc::Rc::new(t);
+
     let remote = Remote(tx);
     let handle = Handle {
         remote: remote,
         thandle: core_handle.clone(),
+        data: data.clone(),
         slab: Rc::downgrade(&slab),
     };
 
@@ -120,11 +114,12 @@ pub fn run<T, F>(rt: &Runtime, t: &T, first: F)
             let handle = Handle {
                 remote: remote,
                 thandle: core_handle.clone(),
+                data: data.clone(),
                 slab: Rc::downgrade(&slab),
             };
             //let _ac = JSAutoCompartment::new(rt.cx(), unsafe { CurrentGlobalOrNull(rt.cx()) });
             unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
-            f.call_box(t, handle);
+            f.call_box(handle);
             unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
             Ok(())
         })
@@ -139,6 +134,7 @@ pub fn run<T, F>(rt: &Runtime, t: &T, first: F)
 pub struct Handle<T> {
     remote: Remote<T>,
     thandle: tokio::Handle,
+    data: rc::Rc<T>,
     slab: rc::Weak<RefCell<Slab<RefSlabEl>>>,
 }
 
@@ -147,6 +143,7 @@ impl<T> Clone for Handle<T> {
         Handle {
             remote: self.remote.clone(),
             thandle: self.thandle.clone(),
+            data: self.data.clone(),
             slab: self.slab.clone(),
         }
     }
@@ -159,11 +156,15 @@ impl<T> Handle<T> {
     pub fn remote(&self) -> &Remote<T> {
         &self.remote
     }
+    pub fn get(&self) -> &T {
+        &self.data
+    }
 
     pub fn downgrade(&self) -> WeakHandle<T> {
         WeakHandle {
             remote: Arc::downgrade(&self.remote.0),
             thandle: self.thandle.clone(),
+            data: rc::Rc::downgrade(&self.data),
             slab: self.slab.clone(),
         }
     }
@@ -233,66 +234,31 @@ impl<T> Handle<T> {
         //println!("retrieved: {:?}", val);
         val
     }
-
-    // This seems impossible to do without a Ref<Ref<V>>
-    /*fn borrow<'h: 'r, 'r, V: 'static>(&self, rref: &'r RemoteRef<V>) -> Option<Ref<'r, V>> {
-        let slab = self.slab.upgrade().unwrap();
-        let slab = slab.borrow();
-        let mut out = None;
-
-        let refopt: Ref<Option<Ref<V>>> = Ref::map(slab, |slab| {
-            let r: &RefCell<Option<*mut ()>> = unsafe { slab.get_unchecked(rref.key) };
-            let ro = r.try_borrow();
-
-            match ro {
-                Err(_) => &out,
-                Ok(rro) => {
-                    out = rro.rewrap_map(|vp| unsafe { &*(*vp as *mut V) });
-                    &out
-                }
-            }
-        });
-        match *refopt {
-            Some(_) => Some(Ref::map(refopt, |o| o.unwrap())),
-            None => None,
-        }
-    }
-    fn borrow_mut<V: 'static>(&self, rref: &RemoteRef<V>) -> Option<RefMut<V>> {
-
-        None
-    }*/
 }
 
 #[derive(Clone)]
 pub struct WeakHandle<T> {
     remote: Weak<mpsc::UnboundedSender<Message<T>>>,
     thandle: tokio::Handle,
+    data: rc::Weak<T>,
     slab: rc::Weak<RefCell<Slab<RefSlabEl>>>,
 }
 
 impl<T> WeakHandle<T> {
     pub fn upgrade(&self) -> Option<Handle<T>> {
-        self.remote.upgrade().map(|remote| {
+        let remote = self.remote.upgrade();
+        let data = self.data.upgrade();
+        remote.and_then(|remote| data.map(|data| {
             Handle{
                 remote: Remote(remote),
                 thandle: self.thandle.clone(),
+                data: data,
                 slab: self.slab.clone(),
             }
-        })
+        }))
     }
 }
 
-/*trait Rewrap<'b, T> {
-    fn rewrap_map<V, F: FnOnce(&T) -> &V>(self, f: F) -> Option<Ref<'b, V>>;
-}
-impl<'b, T> Rewrap<'b, T> for Ref<'b, Option<T>> {
-    fn rewrap_map<V, F: FnOnce(&T) -> &V>(self, f: F) -> Option<Ref<'b, V>> {
-        match *self {
-            None => None,
-            Some(_) => Some(Ref::map(self, |o| f(&o.unwrap()))),
-        }
-    }
-}*/
 
 #[derive(Clone)]
 pub struct RemoteRef<V> {
@@ -313,7 +279,7 @@ impl<T> Clone for Remote<T> {
 impl<T> Remote<T> {
 
     pub fn spawn<F>(&self, f: F)
-        where F: FnOnce(&T, Handle<T>) + Send + 'static
+        where F: FnOnce(Handle<T>) + Send + 'static
     {
         let me: Remote<T> = (*self).clone();
         let myfunc: Box<FnBox<T> + 'static> = Box::new( f );
@@ -324,12 +290,12 @@ impl<T> Remote<T> {
 }
 
 trait FnBox<T>: Send {
-    fn call_box(self: Box<Self>, t: &T, h: Handle<T>);
+    fn call_box(self: Box<Self>, h: Handle<T>);
 }
 
-impl<T, F: FnOnce(&T, Handle<T>) + Send + 'static> FnBox<T> for F {
-    fn call_box(self: Box<Self>, t: &T, h: Handle<T>) {
-        (*self)(t, h)
+impl<T, F: FnOnce(Handle<T>) + Send + 'static> FnBox<T> for F {
+    fn call_box(self: Box<Self>, h: Handle<T>) {
+        (*self)(h)
     }
 }
 
