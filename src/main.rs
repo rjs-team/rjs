@@ -509,8 +509,6 @@ fn window_thread(
     let streams = handle_window_events
         .select(recv_msgs)
         .then(|_| -> Result<(), ()> { Ok(()) });
-    core.run(stop_recv.select(streams))
-        .map_err(|_| "Oh crap!")
-        .unwrap();
+    let _ = core.run(stop_recv.select(streams)).map_err(|_| "Oh crap!");
     println!("window_thread exiting");
 }
