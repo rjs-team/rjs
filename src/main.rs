@@ -382,7 +382,7 @@ js_class!{ Window
 
         JS_SetPrivate(this, ptr::null_mut() as *mut _);
         let win = Box::from_raw(private as *mut Window);
-        win.send_msg.unbounded_send(WindowMsg::Close).unwrap();
+        let _ = win.send_msg.unbounded_send(WindowMsg::Close);
         win.thread.join().unwrap();
         println!("window dropped");
     }
