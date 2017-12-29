@@ -1,28 +1,11 @@
-
-use mozjs::jsapi::JSContext;
-use mozjs::jsapi::JSObject;
-use mozjs::jsapi::JS_InitClass;
-use mozjs::jsapi::HandleObject;
-use mozjs::jsapi::JSClass;
-//use mozjs::jsapi::JSClassOps;
-use mozjs::jsapi::JSFunctionSpec;
-use mozjs::jsapi::JSNativeWrapper;
-use mozjs::jsapi::JSPropertySpec;
-use mozjs::jsapi::JSCLASS_RESERVED_SLOTS_SHIFT;
-
-//use mozjs::JSCLASS_GLOBAL_SLOT_COUNT;
-//use mozjs::JSCLASS_IS_GLOBAL;
+use mozjs::jsapi::{HandleObject, JSClass, JSContext, JSFunctionSpec, JSNativeWrapper, JSObject,
+                   JSPropertySpec, JS_InitClass, JSCLASS_RESERVED_SLOTS_SHIFT};
 use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
-
 use jslib::jsfn::RJSFn;
-
-//use libc::c_char;
 use libc::c_uint;
-
 use std::ptr;
-//use std::sync::Mutex;
 
-pub const JSCLASS_HAS_PRIVATE: c_uint = 1 << 0;
+pub const JSCLASS_HAS_PRIVATE: c_uint = 1;
 pub const fn jsclass_has_reserved_slots(n: c_uint) -> c_uint {
     (n & JSCLASS_RESERVED_SLOTS_MASK) << JSCLASS_RESERVED_SLOTS_SHIFT
 }
@@ -55,17 +38,29 @@ pub const fn null_function() -> JSFunctionSpec {
 
 pub trait JSClassInitializer {
     unsafe fn init_class(cx: *mut JSContext, obj: HandleObject) -> *mut JSObject {
-
         let parent_proto = HandleObject::null();
         let cls = Self::class();
         let constr = Self::constr();
-        let (constrfn, constrnargs) = constr.map(|c| (Some(c.func()), c.nargs())).unwrap_or((None, 0));
+        let (constrfn, constrnargs) = constr
+            .map(|c| (Some(c.func()), c.nargs()))
+            .unwrap_or((None, 0));
         let props = Self::properties();
         let fns = Self::functions();
         let static_props = Self::static_properties();
         let static_fns = Self::static_functions();
 
-        JS_InitClass(cx, obj, parent_proto, cls, constrfn, constrnargs, props, fns, static_props, static_fns)
+        JS_InitClass(
+            cx,
+            obj,
+            parent_proto,
+            cls,
+            constrfn,
+            constrnargs,
+            props,
+            fns,
+            static_props,
+            static_fns,
+        )
     }
     fn class() -> *const JSClass;
     fn functions() -> *const JSFunctionSpec;
@@ -80,7 +75,6 @@ pub trait JSClassInitializer {
         None
     }
 }
-
 
 #[macro_export]
 macro_rules! compute_once {
@@ -107,7 +101,6 @@ macro_rules! c_str {
 
 #[macro_export]
 macro_rules! js_class {
-
     ($name:ident [$flags:expr] $($body:tt)*) => {
         //trace_macros!{true}
         __jsclass_parse!{$name [$flags] [()] [] [] [] [] $($body)*}
@@ -144,11 +137,10 @@ impl JSClassInitializer for $name {
             *const JSClass = ptr::null();
             {
                 Box::into_raw(Box::new( JSClass {
-                    //name: CString::new(stringify!($name)).unwrap().into_raw(),
                     name: c_str!(stringify!($name)),
                     flags: $flags,
                     cOps: __jsclass_ops!([] $($ops)*),
-                    reserved: [0 as *mut _; 3],
+                    reserved: [ptr::null_mut() as *mut _; 3],
                 }))
             }
         }
@@ -201,7 +193,7 @@ impl JSClassInitializer for $name {
 }
 
 
-    
+
     }
 } // macro_rules! js_class
 
@@ -209,7 +201,6 @@ impl JSClassInitializer for $name {
 macro_rules! nothing {
     ($($any:tt)*) => {}
 }
-
 
 #[macro_export]
 macro_rules! __jsclass_parse {
@@ -319,7 +310,6 @@ macro_rules! __jsclass_ops {
     };
 }
 
-
 #[macro_export]
 macro_rules! __jsclass_constrspec {
     ([fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}]) => {
@@ -395,4 +385,3 @@ macro_rules! __jsclass_propertyspec {
         __jsclass_propertyspec!{{$vec, $getter, JSNativeWrapper { op: Some($fname{}.func()), info: ptr::null() }} @prop $name { $($rest)* }}
     };
 }
-
