@@ -1,0 +1,29 @@
+language: rust
+
+cache: cargo
+
+rust:
+  - stable
+  - beta
+  - nightly
+
+matrix:
+  allow_failures:
+    - rust: nightly
+
+before_script:
+  - rustup install nightly
+  - cargo +nightly install clippy --force
+  - cargo +nightly install rustfmt-nightly --force
+
+script:
+  - cargo test
+  - cargo +nightly clippy
+  - cargo +nightly fmt -- --write-mode diff
+
+git:
+  depth: 1
+
+notifications:
+  email:
+    on_success: never
