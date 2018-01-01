@@ -272,12 +272,11 @@ js_class!{ Window
     private: Window,
 
     @constructor
-    fn Window_constr(_rcx: &RJSContext, handle: &RJSHandle, args: CallArgs) -> JSRet<*mut JSObject> {
+    fn Window_constr(handle: &RJSHandle, args: CallArgs) -> JSRet<*mut JSObject> {
         let rcx = handle.get();
         let jswin = unsafe { JS_NewObjectForConstructor(rcx.cx, Window::class(), &args) };
 
         let handle: RJSHandle = handle.clone();
-        let _ = handle.remote();
 
         let (send_events, recv_events) = mpsc::unbounded();
         let (send_msg, recv_msg) = mpsc::unbounded();
@@ -371,9 +370,9 @@ js_class!{ Window
     }
 
     @op(finalize)
-    fn Window_finalize(free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
-        let rt = (*free).runtime_;
-        let _cx = JS_GetContext(rt);
+    fn Window_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
+        //let rt = (*free).runtime_;
+        //let cx = JS_GetContext(rt);
 
         let private = JS_GetPrivate(this);
         if private.is_null() {

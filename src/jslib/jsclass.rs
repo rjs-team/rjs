@@ -119,6 +119,7 @@ $( __jsclass_toplevel!{_prop $props} )*
 
 impl $name {
 
+    #[allow(dead_code)]
     fn get_private(cx: *mut JSContext, obj: Handle<*mut JSObject>, args: &mut CallArgs) -> Option<*mut $private> {
         unsafe {
             let ptr = JS_GetInstancePrivate(cx, obj, Self::class(), args as *mut CallArgs) as *mut $private;
