@@ -1,111 +1,68 @@
-
 #![feature(fnbox)]
 #![feature(const_fn)]
 #![feature(libc)]
 #![feature(trace_macros)]
-#![recursion_limit="10000"]
+#![recursion_limit = "10000"]
 // #![cfg(feature = "debugmozjs")]
 
+extern crate futures;
+extern crate gl;
+extern crate glutin;
+extern crate libc;
 #[macro_use]
 extern crate mozjs;
-extern crate libc;
 #[macro_use]
 extern crate rjs;
 extern crate tokio_core;
-extern crate futures;
-extern crate glutin;
-extern crate gl;
 
-use rjs::jslib::eventloop;
-use rjs::jslib::jsfn::RuntimePrivate;
-use rjs::jslib::context::{RJSContext, RJSHandle};
-use tokio_core::reactor::Timeout;
-use tokio_core::reactor::Core;
+use futures::Stream;
 use futures::future::Future;
 use futures::sync::mpsc;
-
-use std::os::raw::c_void;
-use mozjs::jsapi;
-use jsapi::CallArgs;
-use jsapi::CompartmentOptions;
-use jsapi::JSAutoCompartment;
-use jsapi::JSContext;
-use jsapi::JSObject;
-use jsapi::JS_NewObjectForConstructor;
-//use jsapi::JSFunction;
-use jsapi::JS_CallFunctionValue;
-//use jsapi::JS_DefineFunction;
-//use jsapi::JS_EncodeStringToUTF8;
-//use jsapi::JS_free;
-use jsapi::JS_GetRuntime;
-use jsapi::JS_GetRuntimePrivate;
-//use jsapi::JS_InitStandardClasses;
-use jsapi::JS_NewGlobalObject;
-use jsapi::JS_ReportError;
-use jsapi::{JS_NewArrayObject1, JS_SetElement};
-// use jsapi::JS_SetGCZeal; // seems to be missing
-use jsapi::JS_SetRuntimePrivate;
-use jsapi::OnNewGlobalHookOption;
-use jsapi::Value;
-use rjs::jslib::jsclass::JSCLASS_HAS_PRIVATE;
-use mozjs::jsval;
-use jsval::JSVal;
-use jsval::{ObjectValue, UndefinedValue};
-use mozjs::jsapi::{ JSPROP_ENUMERATE, JSPROP_SHARED };
-use mozjs::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
-use mozjs::conversions::{FromJSValConvertible, ToJSValConvertible};
-use mozjs::conversions::ConversionResult;
-//use rjs::jslib::jsclass;
-use rjs::jslib::jsfn::{JSRet, RJSFn};
-use rjs::jslib::jsclass::{JSClassInitializer, null_function, null_property, null_wrapper};
-use mozjs::jsapi::JSClass;
-use mozjs::jsapi::JSClassOps;
-use mozjs::jsapi::JSFunctionSpec;
-use mozjs::jsapi::JSNativeWrapper;
-use mozjs::jsapi::JSPropertySpec;
-use mozjs::jsapi::{JS_SetPrivate, JS_GetPrivate, JS_GetInstancePrivate, JS_InitStandardClasses};
-use futures::Stream;
-use tokio_core::reactor::Interval;
-use mozjs::conversions::ConversionBehavior;
-use mozjs::jsapi::Handle;
-use mozjs::jsapi::{JS_NewPlainObject, JS_SetProperty};
-use mozjs::jsval::{NullValue};
-use mozjs::jsapi::JS_SetGCZeal;
-
-
 use glutin::GlContext;
-
-use std::ptr;
+use jsapi::{CallArgs, CompartmentOptions, JSAutoCompartment, JSContext, JSObject,
+            JS_CallFunctionValue, JS_GetRuntime, JS_GetRuntimePrivate, JS_NewArrayObject1,
+            JS_NewGlobalObject, JS_NewObjectForConstructor, JS_ReportError, JS_SetElement,
+            JS_SetRuntimePrivate, OnNewGlobalHookOption, Value};
+use jsval::{JSVal, ObjectValue, UndefinedValue};
+use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConvertible,
+                         ToJSValConvertible};
+use mozjs::jsapi::{Handle, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper, JSPropertySpec,
+                   JS_GetContext, JS_GetInstancePrivate, JS_GetPrivate, JS_InitStandardClasses,
+                   JS_NewPlainObject, JS_SetGCZeal, JS_SetPrivate, JS_SetProperty,
+                   JSPROP_ENUMERATE, JSPROP_SHARED};
+use mozjs::jsapi;
+use mozjs::jsval::NullValue;
+use mozjs::jsval;
+use mozjs::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
+use rjs::jslib::context::{RJSContext, RJSHandle};
+use rjs::jslib::eventloop;
+use rjs::jslib::jsclass::{null_function, null_property, null_wrapper, JSClassInitializer,
+                          JSCLASS_HAS_PRIVATE};
+use rjs::jslib::jsfn::{JSRet, RJSFn, RuntimePrivate};
+use std::boxed::FnBox;
 use std::env;
-use std::fs;
-use std::fs::File;
-use std::path::Path;
-// use std::io;
-//use std::ffi::CStr;
-use std::str;
-use std::io::Read;
-use std::time::{Duration};
 use std::ffi::CString;
-//use std::marker::PhantomData;
-//use std::fmt;
-//use std::fmt::Display;
+use std::fs::File;
+use std::fs;
+use std::io::Read;
+use std::os::raw::c_void;
+use std::path::Path;
+use std::ptr;
+use std::str;
 use std::sync::{Once, ONCE_INIT};
 use std::thread;
-use std::boxed::FnBox;
-
-
-
-
+use std::time::Duration;
+use tokio_core::reactor::{Core, Interval, Timeout};
 
 fn main() {
-    let filename = env::args().nth(1)
+    let filename = env::args()
+        .nth(1)
         .expect("Expected a filename as the first argument");
 
     let mut file = File::open(&filename).expect("File is missing");
     let mut contents = String::new();
-    file.read_to_string(&mut contents).expect("Cannot read file");
-
-
+    file.read_to_string(&mut contents)
+        .expect("Cannot read file");
 
     let rt = Runtime::new().unwrap();
     unsafe { JS_SetGCZeal(rt.rt(), 2, 1) };
@@ -124,8 +81,7 @@ fn main() {
     };
 
     eventloop::run(&rt, rcx, |handle| {
-
-        let privatebox : Box<RuntimePrivate> = Box::new(handle.downgrade());
+        let privatebox: Box<RuntimePrivate> = Box::new(handle.downgrade());
         unsafe { JS_SetRuntimePrivate(rt.rt(), Box::into_raw(privatebox) as *mut c_void) };
 
         let _ac = JSAutoCompartment::new(cx, global.get());
@@ -134,36 +90,35 @@ fn main() {
         // println!("JS_InitStandardClasses()");
 
         unsafe {
-            let _ = puts{}.define_on(cx, global, 0);
-            let _ = setTimeout{}.define_on(cx, global, 0);
-            let _ = getFileSync{}.define_on(cx, global, 0);
-            let _ = readDir{}.define_on(cx, global, 0);
+            let _ = puts {}.define_on(cx, global, 0);
+            let _ = setTimeout {}.define_on(cx, global, 0);
+            let _ = getFileSync {}.define_on(cx, global, 0);
+            let _ = readDir {}.define_on(cx, global, 0);
 
             Test::init_class(cx, global);
             Window::init_class(cx, global);
         }
 
-
         rooted!(in(cx) let mut rval = UndefinedValue());
-        let res = rt.evaluate_script(global, &contents,
-                                   &filename, 1, rval.handle_mut());
+        let res = rt.evaluate_script(global, &contents, &filename, 1, rval.handle_mut());
         if !res.is_ok() {
-            unsafe { report_pending_exception(cx); }
+            unsafe {
+                report_pending_exception(cx);
+            }
         }
 
-        let str = unsafe { String::from_jsval(cx, rval.handle(), ()) }.to_result().unwrap();
+        let str = unsafe { String::from_jsval(cx, rval.handle(), ()) }
+            .to_result()
+            .unwrap();
 
         println!("script result: {}", str);
-
     });
 
-    let privatebox: Box<RuntimePrivate> = unsafe { Box::from_raw(JS_GetRuntimePrivate(rt.rt()) as *mut _ )};
-    drop(privatebox);
+    let _: Box<RuntimePrivate> = unsafe { Box::from_raw(JS_GetRuntimePrivate(rt.rt()) as *mut _) };
 }
 
-
 trait ToResult<T> {
-    fn to_result(self) -> Result<T, Option<String> >;
+    fn to_result(self) -> Result<T, Option<String>>;
 }
 
 impl<T> ToResult<T> for Result<mozjs::conversions::ConversionResult<T>, ()> {
@@ -176,12 +131,10 @@ impl<T> ToResult<T> for Result<mozjs::conversions::ConversionResult<T>, ()> {
     }
 }
 
-
 js_fn!{fn puts(arg: String) -> JSRet<()> {
     println!("puts: {}", arg);
     Ok(())
 }}
-
 
 js_fn!{fn setTimeout(rcx: &RJSContext, handle: &RJSHandle, callback: JSVal, timeout: u64 {ConversionBehavior::Default}) -> JSRet<()> {
     rooted!(in(rcx.cx) let callback = callback);
@@ -194,42 +147,30 @@ js_fn!{fn setTimeout(rcx: &RJSContext, handle: &RJSHandle, callback: JSVal, time
 
     handle.core_handle().spawn(
         timeout.map_err(|_|()).and_then(move|_| {
-            //remote.spawn(move|rcx, handle| {
-                let rcx = handle2.get();
-                let _ac = JSAutoCompartment::new(rcx.cx, rcx.global.get());
+            let rcx = handle2.get();
+            let _ac = JSAutoCompartment::new(rcx.cx, rcx.global.get());
 
-                rooted!(in(rcx.cx) let this_val = rcx.global.get());
-                rooted!(in(rcx.cx) let mut rval = UndefinedValue());
+            rooted!(in(rcx.cx) let this_val = rcx.global.get());
+            rooted!(in(rcx.cx) let mut rval = UndefinedValue());
 
-                rooted!(in(rcx.cx) let callback = handle2.retrieve(&callback_ref).unwrap());
+            rooted!(in(rcx.cx) let callback = handle2.retrieve(&callback_ref).unwrap());
 
-                //println!("setTimeout callback");
+            unsafe {
+                let ok = JS_CallFunctionValue(
+                    rcx.cx,
+                    this_val.handle(),
+                    callback.handle(),
+                    &jsapi::HandleValueArray {
+                        elements_: ptr::null_mut(),
+                        length_: 0,
+                    },
+                    rval.handle_mut());
 
-                unsafe {
-                    let ok = JS_CallFunctionValue(
-                        rcx.cx,
-                        this_val.handle(),
-                        callback.handle(),
-                        &jsapi::HandleValueArray {
-                            elements_: ptr::null_mut(),
-                            length_: 0,
-                        },
-                        rval.handle_mut());
-
-                    if !ok {
-                        println!("error!");
-                        report_pending_exception(rcx.cx);
-                    }
+                if !ok {
+                    println!("error!");
+                    report_pending_exception(rcx.cx);
                 }
-                //println!("setTimeout callback done");
-            //});
-            
-            drop(callback);
-            drop(rval);
-            drop(this_val);
-            drop(_ac);
-            drop(rcx);
-
+            }
 
             Ok(())
         })
@@ -248,8 +189,6 @@ js_fn!{fn getFileSync(path: String) -> JSRet<Option<String>> {
     } else {
         Ok(None)
     }
-    // args.rval().set();
-    //true
 }}
 
 js_fn!{fn readDir(rcx: &RJSContext, path: String) -> JSRet<JSVal> {
@@ -280,12 +219,7 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
     println!("Exception!: {}", ex);
 }
 
-
-
-
-struct Test {
-
-}
+struct Test {}
 
 js_class!{ Test
     [JSCLASS_HAS_PRIVATE]
@@ -317,11 +251,11 @@ struct Window {
 
 impl Window {
     fn do_on_thread<F>(&self, f: F)
-        where F: for<'r> FnBox(&'r glutin::GlWindow) + Send + 'static
+    where
+        F: for<'r> FnBox(&'r glutin::GlWindow) + Send + 'static,
     {
-        drop(self.send_msg.unbounded_send(WindowMsg::Do(Box::new(f))));
+        let _ = self.send_msg.unbounded_send(WindowMsg::Do(Box::new(f)));
     }
-
 }
 
 macro_rules! window_get_private {
@@ -361,17 +295,12 @@ js_class!{ Window
                     let _ac = JSAutoCompartment::new(rcx.cx, jswin);
                     rooted!(in(rcx.cx) let obj = unsafe { JS_NewPlainObject(rcx.cx) });
                     match event {
-                        WindowEvent::Glutin(ge) => match ge {
-                            glutin::Event::DeviceEvent {..} => {
-                                rooted!(in(rcx.cx) let mut val = NullValue());
-                                unsafe {
-                                    "device".to_jsval(rcx.cx, val.handle_mut());
-                                    JS_SetProperty(rcx.cx, obj.handle(), c_str!("kind"), val.handle());
-                                }
-                            },
-                            glutin::Event::WindowEvent {..} => (),
-                            glutin::Event::Suspended {..} => (),
-                            glutin::Event::Awakened => (),
+                        WindowEvent::Glutin(ge) => if let glutin::Event::DeviceEvent {..} = ge {
+                            rooted!(in(rcx.cx) let mut val = NullValue());
+                            unsafe {
+                                "device".to_jsval(rcx.cx, val.handle_mut());
+                                JS_SetProperty(rcx.cx, obj.handle(), c_str!("kind"), val.handle());
+                            }
                         },
                         WindowEvent::Closed => { println!("WindowEvent closed"); },
                     }
@@ -422,7 +351,7 @@ js_class!{ Window
         let win = window_get_private!(this);
 
         win.do_on_thread(
-            move |_glwin: &glutin::GlWindow| {
+            move |_: &glutin::GlWindow| {
                 unsafe { gl::ClearColor(r, g, b, a) };
             });
 
@@ -433,7 +362,7 @@ js_class!{ Window
         let win = window_get_private!(this);
 
         win.do_on_thread(
-            move |_glwin: &glutin::GlWindow| {
+            move |_: &glutin::GlWindow| {
                 unsafe { gl::Clear(mask) };
             });
 
@@ -450,9 +379,9 @@ js_class!{ Window
             return
         }
 
-        JS_SetPrivate(this, 0 as *mut _);
+        JS_SetPrivate(this, ptr::null_mut() as *mut _);
         let win = Box::from_raw(private as *mut Window);
-        drop(win.send_msg.unbounded_send(WindowMsg::Close));
+        let _ = win.send_msg.unbounded_send(WindowMsg::Close);
         win.thread.join().unwrap();
         println!("window dropped");
     }
@@ -464,7 +393,6 @@ enum WindowMsg {
     Close,
 }
 
-
 #[derive(Debug)]
 enum WindowEvent {
     Glutin(glutin::Event),
@@ -474,16 +402,17 @@ enum WindowEvent {
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-fn window_thread(recv_msg: mpsc::UnboundedReceiver<WindowMsg>, send_events: mpsc::UnboundedSender<WindowEvent>) {
+fn window_thread(
+    recv_msg: mpsc::UnboundedReceiver<WindowMsg>,
+    send_events: mpsc::UnboundedSender<WindowEvent>,
+) {
     let mut core = Core::new().unwrap();
 
     let mut events_loop = glutin::EventsLoop::new();
     let window = glutin::WindowBuilder::new()
         .with_title("RJS Window")
         .with_dimensions(1024, 768);
-    let context = glutin::ContextBuilder::new()
-        .with_vsync(true);
+    let context = glutin::ContextBuilder::new().with_vsync(true);
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
 
     unsafe {
@@ -493,7 +422,7 @@ fn window_thread(recv_msg: mpsc::UnboundedReceiver<WindowMsg>, send_events: mpsc
     }
 
     let (stop_send, stop_recv) = futures::sync::oneshot::channel();
-    let stop_recv = stop_recv.map_err(|_err| ());
+    let stop_recv = stop_recv.map_err(|_| ());
 
     struct WindowStuff {
         gl_window: glutin::GlWindow,
@@ -507,36 +436,44 @@ fn window_thread(recv_msg: mpsc::UnboundedReceiver<WindowMsg>, send_events: mpsc
         }
     }
 
-    let stuff = Rc::new(RefCell::new(
-        WindowStuff {
-            gl_window: gl_window,
-            stop: Some(stop_send),
-        }));
-
+    let stuff = Rc::new(RefCell::new(WindowStuff {
+        gl_window: gl_window,
+        stop: Some(stop_send),
+    }));
 
     let recv_msgs = {
-        let stuff = stuff.clone();
-        recv_msg.for_each(move |msg| -> Result<(), ()> {
-            let mut stuff = stuff.borrow_mut();
-            let stuff = &mut *stuff;
-            match msg {
-                WindowMsg::Do(func) => { println!("message Do");  func.call_box((&stuff.gl_window,)); },
-                WindowMsg::Ping => { println!("pong"); },
-                WindowMsg::Close => {
-                    println!("close");
-                    stuff.stop();
-                    stuff.gl_window.hide();
-                },
-            }
+        let stuff = Rc::clone(&stuff);
+        recv_msg
+            .for_each(move |msg| -> Result<(), ()> {
+                let mut stuff = stuff.borrow_mut();
+                let stuff = &mut *stuff;
+                match msg {
+                    WindowMsg::Do(func) => {
+                        println!("message Do");
+                        func.call_box((&stuff.gl_window,));
+                    }
+                    WindowMsg::Ping => {
+                        println!("pong");
+                    }
+                    WindowMsg::Close => {
+                        println!("close");
+                        stuff.stop();
+                        stuff.gl_window.hide();
+                    }
+                }
 
-            Ok(())
-        }).then(|_| -> Result<(), ()> { Ok(()) })
+                Ok(())
+            })
+            .then(|_| -> Result<(), ()> { Ok(()) })
     };
 
-    let handle_window_events = Interval::new(Duration::from_millis(16), &core.handle()).unwrap()
-        .map_err(|err| { println!("Interval err: {}", err); () })
+    let handle_window_events = Interval::new(Duration::from_millis(16), &core.handle())
+        .unwrap()
+        .map_err(|err| {
+            println!("Interval err: {}", err);
+            ()
+        })
         .for_each(move |()| -> Result<(), ()> {
-            //println!("checking for events...");
             let mut stuff = stuff.borrow_mut();
             let stuff = &mut *stuff;
 
@@ -546,28 +483,31 @@ fn window_thread(recv_msg: mpsc::UnboundedReceiver<WindowMsg>, send_events: mpsc
             stuff.gl_window.swap_buffers().unwrap();
 
             events_loop.poll_events(|event| {
-                //println!("glutin event: {:?}", event);
-                match &event {
-                    &glutin::Event::WindowEvent { ref event, .. } => match event {
-                        &glutin::WindowEvent::Closed => {
+                match event {
+                    glutin::Event::WindowEvent { ref event, .. } => match *event {
+                        glutin::WindowEvent::Closed => {
                             stuff.stop();
                             stuff.gl_window.hide();
-                            drop(send_events.unbounded_send(WindowEvent::Closed));
-                        },
-                        &glutin::WindowEvent::Resized(w, h) => stuff.gl_window.resize(w, h),
-                        _ => ()
+                            let _ = send_events.unbounded_send(WindowEvent::Closed);
+                        }
+                        glutin::WindowEvent::Resized(w, h) => stuff.gl_window.resize(w, h),
+                        _ => (),
                     },
-                    &glutin::Event::Awakened => { return; },
-                    _ => ()
+                    glutin::Event::Awakened => {
+                        return;
+                    }
+                    _ => (),
                 };
-                drop(send_events.unbounded_send(WindowEvent::Glutin(event)));
+                let _ = send_events.unbounded_send(WindowEvent::Glutin(event));
             });
 
             Ok(())
-        }).then(|_| -> Result<(), ()> { Ok(()) });
+        })
+        .then(|_| -> Result<(), ()> { Ok(()) });
 
-    let streams = handle_window_events.select(recv_msgs).then(|_| -> Result<(),()> { Ok(()) });
-    drop(core.run(stop_recv.select(streams)));
-
+    let streams = handle_window_events
+        .select(recv_msgs)
+        .then(|_| -> Result<(), ()> { Ok(()) });
+    let _ = core.run(stop_recv.select(streams)).map_err(|_| "Oh crap!");
     println!("window_thread exiting");
 }

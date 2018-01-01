@@ -5,11 +5,10 @@ use mozjs::jsapi::Value;
 use mozjs::jsapi::HandleObject;
 use mozjs::conversions::ToJSValConvertible;
 
-use ::jslib::eventloop;
-use ::jslib::context::{RJSContext};
+use jslib::eventloop;
+use super::context::RJSContext;
 
 use libc;
-//use libc::c_uint;
 use std::ffi::CString;
 
 pub type RuntimePrivate = eventloop::WeakHandle<RJSContext>;
@@ -23,19 +22,22 @@ pub trait RJSFn {
     fn name(&self) -> &'static str;
     fn nargs(&self) -> u32;
 
-    unsafe fn define_on(&self, cx: *mut JSContext, this: HandleObject, flags: u32) -> *mut JSFunction {
+    unsafe fn define_on(
+        &self,
+        cx: *mut JSContext,
+        this: HandleObject,
+        flags: u32,
+    ) -> *mut JSFunction {
         let name = CString::new(self.name()).unwrap().into_raw() as *const libc::c_char;
 
         JS_DefineFunction(cx, this, name, Some(self.func()), self.nargs(), flags)
     }
 }
 
-
-
 #[macro_export]
 macro_rules! js_fn_raw {
     (fn $name:ident($($param:ident : $type:ty),*) -> JSRet<$ret:ty> $body:tt) => (
-        #[allow(non_snake_case)] 
+        #[allow(non_snake_case)]
         unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
             let args = CallArgs::from_vp(vp, argc);
             let rt = JS_GetRuntime(cx);
@@ -69,7 +71,7 @@ macro_rules! js_fn_raw {
 #[macro_export]
 macro_rules! js_fn {
     (fn $name:ident ($($args:tt)*) -> JSRet<$ret:ty> $body:tt) => {
-        #[allow(non_camel_case_types)] 
+        #[allow(non_camel_case_types)]
         pub struct $name;
 
         impl $name {
@@ -102,7 +104,6 @@ macro_rules! js_fn {
     }
 
 }
-
 
 #[macro_export]
 macro_rules! js_callback {

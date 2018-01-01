@@ -1,5 +1,4 @@
-
-use ::jslib::eventloop;
+use jslib::eventloop;
 use mozjs::jsapi::JSContext;
 use mozjs::jsapi::HandleObject;
 

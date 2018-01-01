@@ -1,8 +1,4 @@
-
-
-
 // THIS seems to be difficult currently, since a JSClass in rust doesn't have a call field :(
-
 
 // use tokio_core::reactor::{Core, Handle, Timeout};
 // use futures::Future;
