@@ -2,7 +2,7 @@
 #![feature(const_fn)]
 #![feature(libc)]
 #![feature(trace_macros)]
-#![recursion_limit = "10000"]
+#![recursion_limit = "100"]
 // #![cfg(feature = "debugmozjs")]
 
 extern crate futures;
@@ -27,8 +27,8 @@ use jsval::{JSVal, ObjectValue, UndefinedValue};
 use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConvertible,
                          ToJSValConvertible};
 use mozjs::jsapi::{Handle, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper, JSPropertySpec,
-                   JS_GetContext, JS_GetInstancePrivate, JS_GetPrivate, JS_InitStandardClasses,
-                   JS_NewPlainObject, JS_SetGCZeal, JS_SetPrivate, JS_SetProperty,
+                   JS_GetInstancePrivate, JS_GetPrivate, JS_InitStandardClasses,
+                   JS_NewPlainObject, JS_SetGCZeal, JS_SetPrivate, JS_GetProperty, JS_SetProperty,
                    JSPROP_ENUMERATE, JSPROP_SHARED};
 use mozjs::jsapi;
 use mozjs::jsval::NullValue;
@@ -136,7 +136,11 @@ js_fn!{fn puts(arg: String) -> JSRet<()> {
     Ok(())
 }}
 
-js_fn!{fn setTimeout(rcx: &RJSContext, handle: &RJSHandle, callback: JSVal, timeout: u64 {ConversionBehavior::Default}) -> JSRet<()> {
+js_fn!{fn setTimeout(rcx: &RJSContext,
+                     handle: &RJSHandle,
+                     callback: JSVal,
+                     timeout: u64 {ConversionBehavior::Default}
+                     ) -> JSRet<()> {
     rooted!(in(rcx.cx) let callback = callback);
     let handle2: RJSHandle = handle.clone();
     //let remote = handle.remote().clone();
@@ -446,7 +450,6 @@ fn window_thread(
         recv_msg
             .for_each(move |msg| -> Result<(), ()> {
                 let mut stuff = stuff.borrow_mut();
-                let stuff = &mut *stuff;
                 match msg {
                     WindowMsg::Do(func) => {
                         println!("message Do");

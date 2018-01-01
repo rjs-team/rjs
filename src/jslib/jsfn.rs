@@ -76,7 +76,9 @@ macro_rules! js_fn {
 
         impl $name {
 
-            js_fn_raw!{fn rawfunc (_rcx: &RJSContext, _handle: &RJSHandle, args: CallArgs) -> JSRet<$ret> {
+            js_fn_raw!{fn rawfunc (_rcx: &RJSContext,
+                                   _handle: &RJSHandle,
+                                   args: CallArgs) -> JSRet<$ret> {
                 js_unpack_args!({stringify!($name), _rcx, _handle, args} ($($args)*));
 
                 $body
@@ -129,7 +131,8 @@ macro_rules! js_unpack_args {
     };
     ({$fn:expr, $rcx:expr, $remote:expr, $callargs:expr} ($($args:tt)*)) => {
         if $callargs._base.argc_ != _js_unpack_args_count!($($args)*,) {
-            return Err(Some(format!("{}() requires exactly {} argument", $fn, _js_unpack_args_count!($($args)*,)).into()));
+            return Err(Some(format!("{}() requires exactly {} argument", $fn,
+                _js_unpack_args_count!($($args)*,)).into()));
         }
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, 0) $($args)*,);
     };
@@ -165,35 +168,42 @@ macro_rules! _js_unpack_args_count {
 
 #[macro_export]
 macro_rules! _js_unpack_args_unwrap_args {
-    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $(,)*) => {
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
+     $(,)*) => {
     };
     // special: @this
-    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $name:ident : @this, $($args:tt)*) => {
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
+     $name:ident : @this, $($args:tt)*) => {
         let $name = $callargs.thisv();
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
     };
     // RJSContext
-    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $name:ident : &RJSContext, $($args:tt)*) => {
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
+     $name:ident : &RJSContext, $($args:tt)*) => {
         let $name: &RJSContext = $rcx;
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
     };
     // RJSHandle
-    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $name:ident : &RJSHandle, $($args:tt)*) => {
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
+     $name:ident : &RJSHandle, $($args:tt)*) => {
         let $name: &RJSHandle = $remote;
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
     };
     // CallArgs
-    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $name:ident : CallArgs, $($args:tt)*) => {
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
+     $name:ident : CallArgs, $($args:tt)*) => {
         let $name = $callargs;
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
     };
     // options
-    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $name:ident : $type:ty {$opt:expr}, $($args:tt)*) => {
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
+     $name:ident : $type:ty {$opt:expr}, $($args:tt)*) => {
         let $name = unsafe { <$type>::from_jsval($rcx.cx, $callargs.get($n), $opt).to_result()? };
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n+1) $($args)*);
     };
     // no options
-    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr) $name:ident : $type:ty, $($args:tt)*) => {
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
+     $name:ident : $type:ty, $($args:tt)*) => {
         let $name = unsafe { <$type>::from_jsval($rcx.cx, $callargs.get($n), ()).to_result()? };
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n+1) $($args)*);
     };

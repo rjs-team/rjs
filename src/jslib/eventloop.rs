@@ -230,11 +230,13 @@ impl<T> WeakHandle<T> {
         let remote = self.remote.upgrade();
         let data = self.data.upgrade();
         remote.and_then(|remote| {
-            data.map(|data| Handle {
-                remote: Remote(remote),
-                thandle: self.thandle.clone(),
-                data: data,
-                slab: self.slab.clone(),
+            data.map(|data| {
+                Handle {
+                    remote: Remote(remote),
+                    thandle: self.thandle.clone(),
+                    data: data,
+                    slab: self.slab.clone(),
+                }
             })
         })
     }
