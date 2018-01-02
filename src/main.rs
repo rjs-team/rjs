@@ -16,7 +16,7 @@ extern crate rjs;
 extern crate tokio_core;
 
 use futures::Stream;
-use futures::future::{Future, Loop, loop_fn};
+use futures::future::{loop_fn, Future, Loop};
 use futures::sync::mpsc;
 use glutin::GlContext;
 use jsapi::{CallArgs, CompartmentOptions, JSAutoCompartment, JSContext, JSObject,
@@ -27,8 +27,8 @@ use jsval::{JSVal, ObjectValue, UndefinedValue};
 use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConvertible,
                          ToJSValConvertible};
 use mozjs::jsapi::{Handle, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper, JSPropertySpec,
-                   JS_GetInstancePrivate, JS_GetPrivate, JS_InitStandardClasses,
-                   JS_NewPlainObject, JS_SetGCZeal, JS_SetPrivate, JS_GetProperty, JS_SetProperty,
+                   JS_GetInstancePrivate, JS_GetPrivate, JS_GetProperty, JS_InitStandardClasses,
+                   JS_NewPlainObject, JS_SetGCZeal, JS_SetPrivate, JS_SetProperty,
                    JSPROP_ENUMERATE, JSPROP_SHARED};
 use mozjs::jsapi;
 use mozjs::jsval::NullValue;
@@ -51,7 +51,7 @@ use std::ptr;
 use std::str;
 use std::sync::{Once, ONCE_INIT};
 use std::thread;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 use tokio_core::reactor::{Core, Timeout};
 
 fn main() {
@@ -491,7 +491,9 @@ fn window_thread(
     let handle_window_events = loop_fn((), move |()| {
         let mut stuff = stuff.borrow_mut();
 
-        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT); }
+        unsafe {
+            gl::Clear(gl::COLOR_BUFFER_BIT);
+        }
         let now = Instant::now();
         stuff.gl_window.swap_buffers().unwrap();
         let swap_time = now.elapsed();
@@ -519,15 +521,14 @@ fn window_thread(
             let _ = send_events.unbounded_send(WindowEvent::Glutin(event));
         });
 
-        Timeout::new(Duration::from_millis(16), handle).unwrap().map(|_| Loop::Continue(()))
-    })
-    .map_err(|_| ());
+        Timeout::new(Duration::from_millis(16), handle)
+            .unwrap()
+            .map(|_| Loop::Continue(()))
+    }).map_err(|_| ());
 
-    let streams = handle_window_events.select(recv_msgs).then(
-        |_| -> Result<(), ()> {
-            Ok(())
-        },
-    );
+    let streams = handle_window_events
+        .select(recv_msgs)
+        .then(|_| -> Result<(), ()> { Ok(()) });
     let _ = core.run(stop_recv.select(streams)).map_err(|_| "Oh crap!");
     println!("window_thread exiting");
 }
