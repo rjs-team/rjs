@@ -22,9 +22,10 @@ use mozjs::jsapi::{GCForReason, Heap, JSGCInvocationKind, JSTracer, JS_AddExtraG
                    JS_RemoveExtraGCRootsTracer, Reason};
 
 use std::os::raw::c_void;
+use std::boxed::FnBox;
 
 //type EventLoopFn<T> = for<'t> Fn(&'t T, Handle<T>);
-type Message<T> = (Remote<T>, Box<FnBox<T>>);
+type Message<T> = (Remote<T>, Box<FnBox(Handle<T>) -> ()>);
 
 type RefSlab = RefCell<Slab<RefSlabEl>>;
 type RefSlabEl = RefCell<Option<Box<Traceable>>>;
@@ -104,7 +105,7 @@ where
                 slab: Rc::downgrade(&slab),
             };
             unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
-            f.call_box(handle);
+            f.call_box((handle, ));
             unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
             Ok(())
         })
@@ -258,19 +259,10 @@ impl<T> Remote<T> {
         F: FnOnce(Handle<T>) + Send + 'static,
     {
         let me: Remote<T> = (*self).clone();
-        let myfunc: Box<FnBox<T> + 'static> = Box::new(f);
+        let myfunc: Box<FnBox(Handle<T>) -> () + 'static> = Box::new(f);
         //let myfunc: Box<FnBox<T>> = Box::new( |a, b| f(a, b) );
         let fb = (me, myfunc);
         (*self.0).unbounded_send(fb).unwrap()
     }
 }
 
-trait FnBox<T>: Send {
-    fn call_box(self: Box<Self>, h: Handle<T>);
-}
-
-impl<T, F: FnOnce(Handle<T>) + Send + 'static> FnBox<T> for F {
-    fn call_box(self: Box<Self>, h: Handle<T>) {
-        (*self)(h)
-    }
-}
