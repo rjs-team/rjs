@@ -5,3 +5,7 @@ pub mod jsclass;
 pub mod jsfn;
 pub mod eventloop;
 pub mod context;
+#[macro_use]
+pub mod upcast;
+#[cfg(test)]
+mod upcast_test;
