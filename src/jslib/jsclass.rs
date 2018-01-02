@@ -37,8 +37,11 @@ pub const fn null_function() -> JSFunctionSpec {
 }
 
 pub trait JSClassInitializer {
-    unsafe fn init_class(cx: *mut JSContext, obj: HandleObject) -> *mut JSObject {
-        let parent_proto = HandleObject::null();
+    unsafe fn init_class(
+        cx: *mut JSContext,
+        obj: HandleObject,
+        parent_proto: HandleObject,
+    ) -> *mut JSObject {
         let cls = Self::class();
         let constr = Self::constr();
         let (constrfn, constrnargs) = constr

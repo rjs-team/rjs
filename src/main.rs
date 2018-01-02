@@ -26,10 +26,10 @@ use jsapi::{CallArgs, CompartmentOptions, JSAutoCompartment, JSContext, JSObject
 use jsval::{JSVal, ObjectValue, UndefinedValue};
 use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConvertible,
                          ToJSValConvertible};
-use mozjs::jsapi::{Handle, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper, JSPropertySpec,
-                   JS_GetInstancePrivate, JS_GetPrivate, JS_GetProperty, JS_InitStandardClasses,
-                   JS_NewPlainObject, JS_SetGCZeal, JS_SetPrivate, JS_SetProperty,
-                   JSPROP_ENUMERATE, JSPROP_SHARED};
+use mozjs::jsapi::{Handle, HandleObject, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper,
+                   JSPropertySpec, JS_GetInstancePrivate, JS_GetPrivate, JS_GetProperty,
+                   JS_InitStandardClasses, JS_NewPlainObject, JS_SetGCZeal, JS_SetPrivate,
+                   JS_SetProperty, JSPROP_ENUMERATE, JSPROP_SHARED};
 use mozjs::jsapi;
 use mozjs::jsval::NullValue;
 use mozjs::jsval;
@@ -95,8 +95,8 @@ fn main() {
             let _ = getFileSync {}.define_on(cx, global, 0);
             let _ = readDir {}.define_on(cx, global, 0);
 
-            Test::init_class(cx, global);
-            Window::init_class(cx, global);
+            Test::init_class(cx, global, HandleObject::null());
+            Window::init_class(cx, global, HandleObject::null());
         }
 
         rooted!(in(cx) let mut rval = UndefinedValue());

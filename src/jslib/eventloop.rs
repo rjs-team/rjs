@@ -105,7 +105,7 @@ where
                 slab: Rc::downgrade(&slab),
             };
             unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
-            f.call_box((handle, ));
+            f.call_box((handle,));
             unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
             Ok(())
         })
@@ -265,4 +265,3 @@ impl<T> Remote<T> {
         (*self.0).unbounded_send(fb).unwrap()
     }
 }
-
