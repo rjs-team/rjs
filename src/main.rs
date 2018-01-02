@@ -16,7 +16,7 @@ extern crate rjs;
 extern crate tokio_core;
 
 use futures::Stream;
-use futures::future::Future;
+use futures::future::{Future, Loop, loop_fn};
 use futures::sync::mpsc;
 use glutin::GlContext;
 use jsapi::{CallArgs, CompartmentOptions, JSAutoCompartment, JSContext, JSObject,
@@ -51,8 +51,8 @@ use std::ptr;
 use std::str;
 use std::sync::{Once, ONCE_INIT};
 use std::thread;
-use std::time::Duration;
-use tokio_core::reactor::{Core, Interval, Timeout};
+use std::time::{Instant, Duration};
+use tokio_core::reactor::{Core, Timeout};
 
 fn main() {
     let filename = env::args()
@@ -295,9 +295,11 @@ js_class!{ Window
             handle.core_handle().spawn(
                 recv_events.for_each(move |event| -> Result<(), ()> {
                     let rcx = handle2.get();
-                    let jswin = handle2.retrieve_copy(&jswin).unwrap();
-                    let _ac = JSAutoCompartment::new(rcx.cx, jswin);
+                    rooted!(in(rcx.cx) let jswin = handle2.retrieve_copy(&jswin).unwrap());
+                    let _ac = JSAutoCompartment::new(rcx.cx, jswin.get());
                     rooted!(in(rcx.cx) let obj = unsafe { JS_NewPlainObject(rcx.cx) });
+
+                    //println!("event received: {:?}", &event);
                     match event {
                         WindowEvent::Glutin(ge) => if let glutin::Event::DeviceEvent {..} = ge {
                             rooted!(in(rcx.cx) let mut val = NullValue());
@@ -307,6 +309,17 @@ js_class!{ Window
                             }
                         },
                         WindowEvent::Closed => { println!("WindowEvent closed"); },
+                    }
+
+                    rooted!(in(rcx.cx) let mut onevent = NullValue());
+                    let fail = unsafe {
+                        JS_GetProperty(rcx.cx,
+                                       jswin.handle(),
+                                       c_str!("onevent"),
+                                       onevent.handle_mut())
+                    };
+                    if fail || onevent.is_null() {
+                        return Ok(());
                     }
 
                     Ok(())
@@ -470,47 +483,51 @@ fn window_thread(
             .then(|_| -> Result<(), ()> { Ok(()) })
     };
 
-    let handle_window_events = Interval::new(Duration::from_millis(16), &core.handle())
-        .unwrap()
-        .map_err(|err| {
-            println!("Interval err: {}", err);
-            ()
-        })
-        .for_each(move |()| -> Result<(), ()> {
-            let mut stuff = stuff.borrow_mut();
-            let stuff = &mut *stuff;
+    // Interval doesn't work great here because it doesn't know how long things will take
+    // and can get out of hand.
 
-            unsafe {
-                gl::Clear(gl::COLOR_BUFFER_BIT);
-            }
-            stuff.gl_window.swap_buffers().unwrap();
+    let handle = &core.handle();
 
-            events_loop.poll_events(|event| {
-                match event {
-                    glutin::Event::WindowEvent { ref event, .. } => match *event {
-                        glutin::WindowEvent::Closed => {
-                            stuff.stop();
-                            stuff.gl_window.hide();
-                            let _ = send_events.unbounded_send(WindowEvent::Closed);
-                        }
-                        glutin::WindowEvent::Resized(w, h) => stuff.gl_window.resize(w, h),
-                        _ => (),
-                    },
-                    glutin::Event::Awakened => {
-                        return;
+    let handle_window_events = loop_fn((), move |()| {
+        let mut stuff = stuff.borrow_mut();
+
+        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT); }
+        let now = Instant::now();
+        stuff.gl_window.swap_buffers().unwrap();
+        let swap_time = now.elapsed();
+        let swap_ms = swap_time.subsec_nanos() as f32 / 1000000.0;
+        if swap_ms > 1.0 {
+            println!("swap took: {}ms", swap_ms);
+        }
+
+        events_loop.poll_events(|event| {
+            match event {
+                glutin::Event::WindowEvent { ref event, .. } => match *event {
+                    glutin::WindowEvent::Closed => {
+                        stuff.stop();
+                        stuff.gl_window.hide();
+                        let _ = send_events.unbounded_send(WindowEvent::Closed);
                     }
+                    glutin::WindowEvent::Resized(w, h) => stuff.gl_window.resize(w, h),
                     _ => (),
-                };
-                let _ = send_events.unbounded_send(WindowEvent::Glutin(event));
-            });
+                },
+                glutin::Event::Awakened => {
+                    return;
+                }
+                _ => (),
+            };
+            let _ = send_events.unbounded_send(WindowEvent::Glutin(event));
+        });
 
+        Timeout::new(Duration::from_millis(16), handle).unwrap().map(|_| Loop::Continue(()))
+    })
+    .map_err(|_| ());
+
+    let streams = handle_window_events.select(recv_msgs).then(
+        |_| -> Result<(), ()> {
             Ok(())
-        })
-        .then(|_| -> Result<(), ()> { Ok(()) });
-
-    let streams = handle_window_events
-        .select(recv_msgs)
-        .then(|_| -> Result<(), ()> { Ok(()) });
+        },
+    );
     let _ = core.run(stop_recv.select(streams)).map_err(|_| "Oh crap!");
     println!("window_thread exiting");
 }

@@ -85,11 +85,11 @@ where
     let handle = Handle {
         remote: remote,
         thandle: core_handle.clone(),
-        data: data.clone(),
+        data: Rc::clone(&data),
         slab: Rc::downgrade(&slab),
     };
 
-    let extradata: *mut rc::Weak<RefSlab> = Box::into_raw(Box::new(handle.slab.clone()));
+    let extradata: *mut rc::Weak<RefSlab> = Box::into_raw(Box::new(rc::Weak::clone(&handle.slab)));
     unsafe { JS_AddExtraGCRootsTracer(rt.rt(), Some(ref_slab_tracer), extradata as *mut _) };
 
     let _: Result<(), ()> = core.run(future::lazy(|| {
@@ -100,7 +100,7 @@ where
             let handle = Handle {
                 remote: remote,
                 thandle: core_handle.clone(),
-                data: data.clone(),
+                data: Rc::clone(&data),
                 slab: Rc::downgrade(&slab),
             };
             unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
@@ -128,8 +128,8 @@ impl<T> Clone for Handle<T> {
         Handle {
             remote: self.remote.clone(),
             thandle: self.thandle.clone(),
-            data: self.data.clone(),
-            slab: self.slab.clone(),
+            data: Rc::clone(&self.data),
+            slab: rc::Weak::clone(&self.slab),
         }
     }
 }
@@ -150,7 +150,7 @@ impl<T> Handle<T> {
             remote: Arc::downgrade(&self.remote.0),
             thandle: self.thandle.clone(),
             data: rc::Rc::downgrade(&self.data),
-            slab: self.slab.clone(),
+            slab: rc::Weak::clone(&self.slab),
         }
     }
 
@@ -167,19 +167,15 @@ impl<T> Handle<T> {
         let key = slab.insert(RefCell::new(Some(valbox)));
 
         let (tx, rx) = oneshot::channel::<()>();
-        let weakslab = self.slab.clone();
+        let weakslab = rc::Weak::clone(&self.slab);
         self.thandle.spawn(rx.then(move |_| {
             let slab = weakslab.upgrade().unwrap();
             let mut slab = slab.borrow_mut();
             let r = slab.remove(key);
             let o = r.into_inner();
-            match o {
-                Some(p) => {
-                    let b: Box<V> = unsafe { p.downcast_unchecked::<V>() };
-                    drop(b);
-                }
-                None => (),
-            };
+            if let Some(p) = o {
+                let _: Box<V> = unsafe { p.downcast_unchecked::<V>() };
+            }
 
             Ok(())
         }));
@@ -235,7 +231,7 @@ impl<T> WeakHandle<T> {
                     remote: Remote(remote),
                     thandle: self.thandle.clone(),
                     data: data,
-                    slab: self.slab.clone(),
+                    slab: rc::Weak::clone(&self.slab),
                 }
             })
         })
@@ -254,7 +250,7 @@ unsafe impl<V> Send for RemoteRef<V> {}
 pub struct Remote<T>(Arc<mpsc::UnboundedSender<Message<T>>>);
 impl<T> Clone for Remote<T> {
     fn clone(&self) -> Self {
-        Remote(self.0.clone())
+        Remote(Arc::clone(&self.0))
     }
 }
 
