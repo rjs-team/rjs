@@ -412,9 +412,7 @@ js_class!{ Window
     }
 
     fn ping(this: @this, rcx: &RJSContext, args: CallArgs) -> JSRet<()> {
-        let mut args = args;
-        rooted!(in(rcx.cx) let this = this.to_object());
-        let win = unsafe { &*Window::get_private(rcx.cx, this.handle(), &mut args).unwrap() };
+        let win = Window::get_private(rcx.cx, this, args).unwrap();
 
         println!("ping");
 
