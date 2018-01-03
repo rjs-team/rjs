@@ -19,10 +19,10 @@ use futures::Stream;
 use futures::future::{loop_fn, Future, Loop};
 use futures::sync::mpsc;
 use glutin::GlContext;
-use jsapi::{CallArgs, CompartmentOptions, JSAutoCompartment, JSContext, JSObject,
-            JS_CallFunctionValue, JS_GetRuntime, JS_GetRuntimePrivate, JS_NewArrayObject1,
-            JS_NewGlobalObject, JS_NewObjectForConstructor, JS_ReportError, JS_SetElement,
-            JS_SetRuntimePrivate, OnNewGlobalHookOption, Value};
+use jsapi::{CallArgs, CompartmentOptions, HandleValue, HandleValueArray, JSAutoCompartment,
+            JSContext, JSObject, JS_CallFunctionValue, JS_GetRuntime, JS_GetRuntimePrivate,
+            JS_NewArrayObject1, JS_NewGlobalObject, JS_NewObjectForConstructor, JS_ReportError,
+            JS_SetElement, JS_SetRuntimePrivate, OnNewGlobalHookOption, Value};
 use jsval::{JSVal, ObjectValue, UndefinedValue};
 use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConvertible,
                          ToJSValConvertible};
@@ -312,14 +312,29 @@ js_class!{ Window
                     }
 
                     rooted!(in(rcx.cx) let mut onevent = NullValue());
-                    let fail = unsafe {
+                    let success = unsafe {
                         JS_GetProperty(rcx.cx,
                                        jswin.handle(),
                                        c_str!("onevent"),
                                        onevent.handle_mut())
                     };
-                    if fail || onevent.is_null() {
+                    if !success || onevent.is_null() {
+                        println!("success: {:?} onevent: {:?}", success, onevent.is_null());
                         return Ok(());
+                    }
+
+                    rooted!(in(rcx.cx) let mut ret = NullValue());
+                    let args = &[ObjectValue(obj.get())];
+                    let args = unsafe { HandleValueArray::from_rooted_slice(args) };
+                    if ! unsafe {
+                        jsapi::Call(rcx.cx,
+                                    HandleValue::null(),
+                                    onevent.handle(),
+                                    &args,
+                                    ret.handle_mut())
+                        } {
+                        // ignore?
+                        unsafe { report_pending_exception(rcx.cx); }
                     }
 
                     Ok(())
@@ -338,6 +353,11 @@ js_class!{ Window
         println!("window constructed");
 
         Ok(jswin)
+    }
+
+    fn getContext(this: @this, str: String) -> JSRet<*mut JSObject> {
+        println!("getContext: {}", str);
+        Ok(this.to_object())
     }
 
     fn ping(this: @this, rcx: &RJSContext, args: CallArgs) -> JSRet<()> {

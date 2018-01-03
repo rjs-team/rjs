@@ -39,6 +39,10 @@ function ping() {
 
 setTimeout(function() {
   window = new Window();
+  window.onevent = function(event) {
+    puts("Event! " + JSON.stringify(event));
+  };
+
   ping();
   setTimeout(changeClear, 1000);
 
