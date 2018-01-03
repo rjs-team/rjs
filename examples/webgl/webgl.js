@@ -1,3 +1,5 @@
+// Shamelessly stolen from https://github.com/gpjt/webgl-lessons/blob/master/lesson01/index.html
+
 let fragment = `
     precision mediump float;
     void main(void) {
@@ -40,8 +42,8 @@ function initGL(canvas) {
     alert("Could not initialise WebGL, sorry :-(");
   }
 }
-/*function getShader(gl, id) {
-  var shaderScript = document.getElementById(id);
+function getShader(gl, type, source) {
+  /*var shaderScript = document.getElementById(id);
   if (!shaderScript) {
     return null;
   }
@@ -52,27 +54,27 @@ function initGL(canvas) {
       str += k.textContent;
     }
     k = k.nextSibling;
-  }
+  }*/
   var shader;
-  if (shaderScript.type == "x-shader/x-fragment") {
+  if (type == "fragment") {
     shader = gl.createShader(gl.FRAGMENT_SHADER);
-  } else if (shaderScript.type == "x-shader/x-vertex") {
+  } else if (type == "vertex") {
     shader = gl.createShader(gl.VERTEX_SHADER);
   } else {
     return null;
   }
-  gl.shaderSource(shader, str);
+  gl.shaderSource(shader, source);
   gl.compileShader(shader);
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     alert(gl.getShaderInfoLog(shader));
     return null;
   }
   return shader;
-}*/
+}
 var shaderProgram;
 function initShaders() {
-  var fragmentShader = fragment; //getShader(gl, "shader-fs");
-  var vertexShader = vertex; //getShader(gl, "shader-vs");
+  var fragmentShader = getShader(gl, "fragment", fragment);
+  var vertexShader = getShader(gl, "vertex", vertex);
   shaderProgram = gl.createProgram();
   gl.attachShader(shaderProgram, vertexShader);
   gl.attachShader(shaderProgram, fragmentShader);
@@ -136,6 +138,9 @@ function drawScene() {
 function webGLStart() {
   //var canvas = document.getElementById("lesson01-canvas");
   let canvas = new Window();
+  canvas.onevent = function(event) {
+    puts("event: " + JSON.stringify(event));
+  };
   initGL(canvas);
   initShaders();
   initBuffers();
