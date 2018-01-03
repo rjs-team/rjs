@@ -1,9 +1,7 @@
 #![feature(fnbox)]
 #![feature(const_fn)]
 #![feature(libc)]
-#![feature(trace_macros)]
 #![recursion_limit = "100"]
-// #![cfg(feature = "debugmozjs")]
 
 extern crate futures;
 extern crate gl;
@@ -28,8 +26,8 @@ use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConverti
                          ToJSValConvertible};
 use mozjs::jsapi::{Handle, HandleObject, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper,
                    JSPropertySpec, JS_GetInstancePrivate, JS_GetPrivate, JS_GetProperty,
-                   JS_InitStandardClasses, JS_NewPlainObject, JS_SetGCZeal, JS_SetPrivate,
-                   JS_SetProperty, JSPROP_ENUMERATE, JSPROP_SHARED};
+                   JS_InitStandardClasses, JS_NewPlainObject, JS_SetPrivate, JS_SetProperty,
+                   JSPROP_ENUMERATE, JSPROP_SHARED};
 use mozjs::jsapi;
 use mozjs::jsval::NullValue;
 use mozjs::jsval;
@@ -65,7 +63,8 @@ fn main() {
         .expect("Cannot read file");
 
     let rt = Runtime::new().unwrap();
-    unsafe { JS_SetGCZeal(rt.rt(), 2, 1) };
+    #[cfg(feature = "debugmozjs")]
+    unsafe { jsapi::JS_SetGCZeal(rt.rt(), 2, 1) };
 
     let cx = rt.cx();
 

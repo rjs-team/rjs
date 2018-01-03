@@ -8,7 +8,7 @@ libc = []
 debugmozjs = ['mozjs/debugmozjs']
 
 [dependencies]
-mozjs = {git = "https://github.com/servo/rust-mozjs", features = ["promises", "debugmozjs"]}
+mozjs = {git = "https://github.com/servo/rust-mozjs", features = ["promises"]}
 tokio-core = "0.1.6"
 tokio-timer = "0.1.1"
 futures = "0.1"
