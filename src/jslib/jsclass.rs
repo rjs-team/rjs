@@ -126,13 +126,12 @@ impl $name {
     #[allow(dead_code)]
     fn get_private<'a>(cx: *mut JSContext,
                    obj: HandleValue,
-                   args: CallArgs) -> Option<&'a $private> {
-        let mut args = args;
+                   args: Option<CallArgs>) -> Option<&'a $private> {
         unsafe {
             let ptr = JS_GetInstancePrivate(cx,
                                             Handle::from_marked_location(&obj.to_object()),
                                             Self::class(),
-                                            &mut args
+                                            args.map_or(ptr::null_mut(), |mut args| &mut args)
                                             ) as *const $private;
             if ptr.is_null() {
                 None

@@ -63,7 +63,7 @@ fn main() {
         .expect("Cannot read file");
 
     let rt = Runtime::new().unwrap();
-    #[cfg(feature = "debugmozjs")]
+    #[cfg(debugmozjs)]
     unsafe { jsapi::JS_SetGCZeal(rt.rt(), 2, 1) };
 
     let cx = rt.cx();
@@ -315,15 +315,6 @@ impl Window {
     }
 }
 
-macro_rules! window_get_private {
-    ($this:ident) => {
-        unsafe {
-            let win = JS_GetPrivate($this.to_object()) as *mut Window;
-            &*win
-        }
-    }
-}
-
 js_class!{ Window
     [JSCLASS_HAS_PRIVATE]
     private: Window,
@@ -414,7 +405,7 @@ js_class!{ Window
     }
 
     fn ping(this: @this, rcx: &RJSContext, args: CallArgs) -> JSRet<()> {
-        let win = Window::get_private(rcx.cx, this, args).unwrap();
+        let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
 
         println!("ping");
 
@@ -425,8 +416,8 @@ js_class!{ Window
         Ok(())
     }
 
-    fn close(this: @this) -> JSRet<()> {
-        let win = window_get_private!(this);
+    fn close(this: @this, rcx: &RJSContext, args: CallArgs) -> JSRet<()> {
+        let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
 
         if let Err(e) = win.send_msg.unbounded_send(WindowMsg::Close) {
             println!("close failed: {}", e);
@@ -435,8 +426,8 @@ js_class!{ Window
         Ok(())
     }
 
-    fn clearColor(this: @this, r: f32, g: f32, b: f32, a: f32) -> JSRet<()> {
-        let win = window_get_private!(this);
+    fn clearColor(this: @this, rcx: &RJSContext, args: CallArgs, r: f32, g: f32, b: f32, a: f32) -> JSRet<()> {
+        let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
 
         win.do_on_thread(
             move |_: &glutin::GlWindow| {
@@ -446,8 +437,8 @@ js_class!{ Window
         Ok(())
     }
 
-    fn clear(this: @this, mask: u32 {ConversionBehavior::Default}) -> JSRet<()> {
-        let win = window_get_private!(this);
+    fn clear(this: @this, rcx: &RJSContext, args: CallArgs, mask: u32 {ConversionBehavior::Default}) -> JSRet<()> {
+        let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
 
         win.do_on_thread(
             move |_: &glutin::GlWindow| {
