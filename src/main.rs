@@ -251,12 +251,13 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
         String::from_utf16_lossy(line)
     };*/
 
-
     //let ex = String::from_jsval(cx, ex.handle(), ()).to_result().unwrap();
-    println!("Exception at {}:{}:{}: {}",
-             filename, report.lineno, report.column, message);
+    println!(
+        "Exception at {}:{}:{}: {}",
+        filename, report.lineno, report.column, message
+    );
     //println!("{:?}", report);
-    
+
     rooted!(in(cx) let stack = jsapi::ExceptionStackOrNull(exhandle));
     if stack.is_null() {
         return;
@@ -264,13 +265,14 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
 
     rooted!(in(cx) let mut stackstr = jsapi::JS_GetEmptyStringValue(cx).to_string());
 
-    let success = jsapi::BuildStackString(cx, stack.
-                                          handle(), stackstr.handle_mut(), 2);
+    let success = jsapi::BuildStackString(cx, stack.handle(), stackstr.handle_mut(), 2);
     if !success {
         return;
     }
     rooted!(in(cx) let stackstr = jsval::StringValue(&mut *stackstr.get()));
-    let stackstr = String::from_jsval(cx, stackstr.handle(), ()).to_result().unwrap();
+    let stackstr = String::from_jsval(cx, stackstr.handle(), ())
+        .to_result()
+        .unwrap();
     println!("{}", stackstr);
 }
 
@@ -369,7 +371,7 @@ js_class!{ Window
                                        c_str!("onevent"),
                                        onevent.handle_mut())
                     };
-                    if !success || onevent.is_null() {
+                    if !success || onevent.is_null_or_undefined() {
                         println!("success: {:?} onevent: {:?}", success, onevent.is_null());
                         return Ok(());
                     }
