@@ -1,6 +1,5 @@
 #![feature(fnbox)]
 #![feature(const_fn)]
-#![feature(libc)]
 #![feature(alloc)]
 #![recursion_limit = "100"]
 

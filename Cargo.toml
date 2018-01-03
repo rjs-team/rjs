@@ -4,7 +4,6 @@ version = "0.1.0"
 authors = ["Matt Peterson <mattpeterson@google.com>"]
 
 [features]
-libc = []
 debugmozjs = ['mozjs/debugmozjs']
 
 [dependencies]
@@ -18,6 +17,7 @@ slab = "0.4.0"
 downcast = "0.9.1"
 glutin = "*"
 gl = "*"
+libc = "0.2.34"
 
 [package.metadata.android]
 label = "Using assets android-rs-glue example"
