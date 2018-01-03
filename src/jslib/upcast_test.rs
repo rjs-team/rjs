@@ -43,7 +43,6 @@ fn test_castable() {
 
 #[test]
 fn test_castable_box() {
-
     let c: Box<Castable> = Box::new(S);
 
     assert_eq!(Some(1), try_cast::<A>(&*c).map(|a: &A| a.a()));
