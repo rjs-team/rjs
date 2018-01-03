@@ -219,8 +219,60 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
     }
     jsapi::JS_ClearPendingException(cx);
 
-    let ex = String::from_jsval(cx, ex.handle(), ()).to_result().unwrap();
-    println!("Exception!: {}", ex);
+    let exhandle = Handle::from_marked_location(&ex.get().to_object());
+
+    let report = jsapi::JS_ErrorFromException(cx, exhandle);
+    if report.is_null() {
+        return;
+    }
+    let report = &*report;
+
+    let filename = {
+        let filename = report.filename as *const u8;
+        if filename.is_null() {
+            "<no filename>".to_string()
+        } else {
+            let length = (0..).find(|i| *filename.offset(*i) == 0).unwrap();
+            let filename = ::std::slice::from_raw_parts(filename, length as usize);
+            String::from_utf8_lossy(filename).into_owned()
+        }
+    };
+
+    let message = {
+        let message = report.ucmessage;
+        let length = (0..).find(|i| *message.offset(*i) == 0).unwrap();
+        let message = ::std::slice::from_raw_parts(message, length as usize);
+        String::from_utf16_lossy(message)
+    };
+
+    /*let line = {
+        let line = report.linebuf_;
+        let length = report.linebufLength_;
+        let line = ::std::slice::from_raw_parts(line, length as usize);
+        String::from_utf16_lossy(line)
+    };*/
+
+
+    //let ex = String::from_jsval(cx, ex.handle(), ()).to_result().unwrap();
+    println!("Exception at {}:{}:{}: {}",
+             filename, report.lineno, report.column, message);
+    //println!("{:?}", report);
+    
+    rooted!(in(cx) let stack = jsapi::ExceptionStackOrNull(exhandle));
+    if stack.is_null() {
+        return;
+    }
+
+    rooted!(in(cx) let mut stackstr = jsapi::JS_GetEmptyStringValue(cx).to_string());
+
+    let success = jsapi::BuildStackString(cx, stack.
+                                          handle(), stackstr.handle_mut(), 2);
+    if !success {
+        return;
+    }
+    rooted!(in(cx) let stackstr = jsval::StringValue(&mut *stackstr.get()));
+    let stackstr = String::from_jsval(cx, stackstr.handle(), ()).to_result().unwrap();
+    println!("{}", stackstr);
 }
 
 struct Test {}
