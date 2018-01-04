@@ -28,7 +28,14 @@ pub trait RJSFn {
         this: HandleObject,
         flags: u32,
     ) -> *mut JSFunction {
-        JS_DefineFunction(cx, this, self.name().as_ptr(), Some(self.func()), self.nargs(), flags)
+        JS_DefineFunction(
+            cx,
+            this,
+            self.name().as_ptr(),
+            Some(self.func()),
+            self.nargs(),
+            flags,
+        )
     }
 }
 

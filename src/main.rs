@@ -426,7 +426,8 @@ js_class!{ Window
         Ok(())
     }
 
-    fn clearColor(this: @this, rcx: &RJSContext, args: CallArgs, r: f32, g: f32, b: f32, a: f32) -> JSRet<()> {
+    fn clearColor(this: @this, rcx: &RJSContext, args: CallArgs, r: f32, g: f32, b: f32, a: f32)
+        -> JSRet<()> {
         let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
 
         win.do_on_thread(
@@ -437,7 +438,8 @@ js_class!{ Window
         Ok(())
     }
 
-    fn clear(this: @this, rcx: &RJSContext, args: CallArgs, mask: u32 {ConversionBehavior::Default}) -> JSRet<()> {
+    fn clear(this: @this, rcx: &RJSContext, args: CallArgs, mask: u32 {ConversionBehavior::Default})
+        -> JSRet<()> {
         let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
 
         win.do_on_thread(
