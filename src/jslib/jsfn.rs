@@ -9,7 +9,7 @@ use jslib::eventloop;
 use super::context::RJSContext;
 
 use libc;
-use std::ffi::CString;
+use std::ffi::CStr;
 
 pub type RuntimePrivate = eventloop::WeakHandle<RJSContext>;
 
@@ -19,7 +19,7 @@ pub type RJSNativeRaw = unsafe extern "C" fn(*mut JSContext, u32, *mut Value) ->
 
 pub trait RJSFn {
     fn func(&self) -> RJSNativeRaw;
-    fn name(&self) -> &'static str;
+    fn name(&self) -> &'static CStr;
     fn nargs(&self) -> u32;
 
     unsafe fn define_on(
@@ -28,9 +28,7 @@ pub trait RJSFn {
         this: HandleObject,
         flags: u32,
     ) -> *mut JSFunction {
-        let name = CString::new(self.name()).unwrap().into_raw() as *const libc::c_char;
-
-        JS_DefineFunction(cx, this, name, Some(self.func()), self.nargs(), flags)
+        JS_DefineFunction(cx, this, self.name().as_ptr(), Some(self.func()), self.nargs(), flags)
     }
 }
 
@@ -92,8 +90,11 @@ macro_rules! js_fn {
                 $name::rawfunc
             }
 
-            fn name(&self) -> &'static str {
-                stringify!($name)
+            fn name(&self) -> &'static ::std::ffi::CStr {
+                unsafe {
+                    ::std::ffi::CStr::from_bytes_with_nul_unchecked(
+                         concat!(stringify!($name), "\0").as_bytes())
+                }
             }
 
             fn nargs(&self) -> u32 {

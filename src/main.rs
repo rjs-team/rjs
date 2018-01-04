@@ -89,10 +89,10 @@ fn main() {
         // println!("JS_InitStandardClasses()");
 
         unsafe {
-            let _ = puts {}.define_on(cx, global, 0);
-            let _ = setTimeout {}.define_on(cx, global, 0);
-            let _ = getFileSync {}.define_on(cx, global, 0);
-            let _ = readDir {}.define_on(cx, global, 0);
+            let _ = puts.define_on(cx, global, 0);
+            let _ = setTimeout.define_on(cx, global, 0);
+            let _ = getFileSync.define_on(cx, global, 0);
+            let _ = readDir.define_on(cx, global, 0);
 
             Test::init_class(cx, global, HandleObject::null());
             Window::init_class(cx, global, HandleObject::null());
