@@ -5,13 +5,7 @@ use mozjs::jsapi::Value;
 use mozjs::jsapi::HandleObject;
 use mozjs::conversions::ToJSValConvertible;
 
-use jslib::eventloop;
-use super::context::RJSContext;
-
-use libc;
 use std::ffi::CStr;
-
-pub type RuntimePrivate = eventloop::WeakHandle<RJSContext>;
 
 pub type JSRet<T: ToJSValConvertible> = Result<T, Option<String>>;
 
@@ -46,7 +40,8 @@ macro_rules! js_fn_raw {
         unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
             let args = CallArgs::from_vp(vp, argc);
             let rt = JS_GetRuntime(cx);
-            let privatebox = JS_GetRuntimePrivate(rt) as *const $crate::jslib::jsfn::RuntimePrivate;
+            let privatebox = JS_GetRuntimePrivate(rt)
+                as *const $crate::jslib::context::RuntimePrivate;
             let handle = (*privatebox).upgrade().unwrap();
             let rcx = handle.get();
             assert!(rcx.cx == cx);
