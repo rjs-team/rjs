@@ -314,6 +314,126 @@ impl Window {
     }
 }
 
+macro_rules! setprop {
+    (in($cx:expr) ($obj:expr) . $prop:ident = $val:expr) => {
+        rooted!(in($cx) let mut val = NullValue());
+        unsafe {
+            $val.to_jsval($cx, val.handle_mut());
+            JS_SetProperty($cx, $obj, c_str!(stringify!($prop)),
+                val.handle());
+        }
+    }
+}
+
+fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Event) {
+    use glutin::Event::*;
+
+    fn set_mouse_scroll_delta(delta: MouseScrollDelta) {
+        match delta {
+            LineDelta(x, y) => {
+                setprop!(in(cx) (obj).deltakind = "line");
+                setprop!(in(cx) (obj).x = x);
+                setprop!(in(cx) (obj).y = y);
+            }
+            PixelDelta(x, y) => {
+                setprop!(in(cx) (obj).deltakind = "pixel");
+                setprop!(in(cx) (obj).x = x);
+                setprop!(in(cx) (obj).y = y);
+            }
+        }
+    }
+
+    match event {
+        DeviceEvent { .. } => {
+            setprop!(in(cx) (obj).kind = "device");
+        }
+        WindowEvent { event, .. } => {
+            use glutin::WindowEvent::*;
+            use glutin::MouseScrollDelta::*;
+            setprop!(in(cx) (obj).kind = "window");
+            match event {
+                Resized(w, h) => {
+                    setprop!(in(cx) (obj).type = "resized");
+                    setprop!(in(cx) (obj).width = w);
+                    setprop!(in(cx) (obj).height = h);
+                }
+                Moved(x, y) => {
+                    setprop!(in(cx) (obj).type = "moved");
+                    setprop!(in(cx) (obj).x = x);
+                    setprop!(in(cx) (obj).y = y);
+                }
+                Closed => {
+                    setprop!(in(cx) (obj).type = "closed");
+                }
+                ReceivedCharacter(c) => {
+                    setprop!(in(cx) (obj).type = "char");
+                    setprop!(in(cx) (obj).char = c.encode_utf8(&mut [0; 4]));
+                }
+                Focused(focused) => {
+                    setprop!(in(cx) (obj).type = "focused");
+                    setprop!(in(cx) (obj).focused = focused);
+                }
+                KeyboardInput { input, .. } => {
+                    setprop!(in(cx) (obj).type = "key");
+                    setprop!(in(cx) (obj).scancode = input.scancode);
+                }
+                CursorMoved { position, .. } => {
+                    setprop!(in(cx) (obj).type = "cursormoved");
+                    setprop!(in(cx) (obj).x = position.0);
+                    setprop!(in(cx) (obj).y = position.1);
+                }
+                CursorEntered { .. } => {
+                    setprop!(in(cx) (obj).type = "cursorentered");
+                }
+                CursorLeft { .. } => {
+                    setprop!(in(cx) (obj).type = "cursorleft");
+                }
+                MouseWheel { delta, .. } => {
+                    setprop!(in(cx) (obj).type = "wheel");
+                    set_mouse_scroll_delta(delta);
+                }
+                MouseInput { state, button, .. } => {
+                    use glutin::ElementState::*;
+                    use glutin::MouseButton::*;
+                    setprop!(in(cx) (obj).type = "mouse");
+                    setprop!(in(cx) (obj).pressed = state == Pressed);
+                    setprop!(in(cx) (obj).button = match button {
+                        Left => 0,
+                        Right => 1,
+                        Middle => 2,
+                        Other(n) => n,
+                    });
+                }
+                Refresh => {
+                    setprop!(in(cx) (obj).type = "refresh");
+                }
+                Touch(touch) => {
+                    use glutin::TouchPhase::*;
+                    setprop!(in(cx) (obj).type = "touch");
+                    setprop!(in(cx) (obj).phase = match touch.phase {
+                        Started => "started",
+                        Moved => "moved",
+                        Ended => "ended",
+                        Cancelled => "cancelled",
+                    });
+                    setprop!(in(cx) (obj).pressed = touch.phase == Started ||
+                             touch.phase == Moved);
+                    setprop!(in(cx) (obj).x = touch.location.0);
+                    setprop!(in(cx) (obj).y = touch.location.1);
+                    setprop!(in(cx) (obj).id = touch.id);
+                }
+                _ => (),
+            }
+        }
+        Suspended { .. } => {
+            setprop!(in(cx) (obj).kind = "suspended");
+        }
+        Awakened => {
+            setprop!(in(cx) (obj).kind = "awakened");
+        }
+    }
+}
+
 js_class!{ Window
     [JSCLASS_HAS_PRIVATE]
     private: Window,
@@ -344,13 +464,7 @@ js_class!{ Window
 
                     //println!("event received: {:?}", &event);
                     match event {
-                        WindowEvent::Glutin(ge) => if let glutin::Event::DeviceEvent {..} = ge {
-                            rooted!(in(rcx.cx) let mut val = NullValue());
-                            unsafe {
-                                "device".to_jsval(rcx.cx, val.handle_mut());
-                                JS_SetProperty(rcx.cx, obj.handle(), c_str!("kind"), val.handle());
-                            }
-                        },
+                        WindowEvent::Glutin(ge) => glutin_event_to_js(rcx.cx, obj.handle(), ge),
                         WindowEvent::Closed => { println!("WindowEvent closed"); },
                     }
 
