@@ -18,9 +18,9 @@ use futures::future::{loop_fn, Future, Loop};
 use futures::sync::mpsc;
 use glutin::GlContext;
 use jsapi::{CallArgs, CompartmentOptions, HandleValue, HandleValueArray, JSAutoCompartment,
-            JSContext, JSObject, JS_CallFunctionValue, JS_GetRuntime, JS_GetRuntimePrivate,
-            JS_NewArrayObject1, JS_NewGlobalObject, JS_NewObjectForConstructor, JS_ReportError,
-            JS_SetElement, JS_SetRuntimePrivate, OnNewGlobalHookOption, Value};
+            JSContext, JSObject, JS_CallFunctionValue, JS_NewArrayObject1, JS_NewGlobalObject,
+            JS_NewObjectForConstructor, JS_ReportError, JS_SetElement, OnNewGlobalHookOption,
+            Value};
 use jsval::{JSVal, ObjectValue, UndefinedValue};
 use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConvertible,
                          ToJSValConvertible};
@@ -32,7 +32,8 @@ use mozjs::jsapi;
 use mozjs::jsval::NullValue;
 use mozjs::jsval;
 use mozjs::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
-use rjs::jslib::context::{RJSContext, RJSHandle, RuntimePrivate};
+use rjs::jslib::context;
+use rjs::jslib::context::{RJSContext, RJSHandle};
 use rjs::jslib::eventloop;
 use rjs::jslib::jsclass::{null_function, null_property, null_wrapper, JSClassInitializer,
                           JSCLASS_HAS_PRIVATE};
@@ -43,7 +44,6 @@ use std::ffi::CString;
 use std::fs::File;
 use std::fs;
 use std::io::Read;
-use std::os::raw::c_void;
 use std::path::Path;
 use std::ptr;
 use std::sync::{Once, ONCE_INIT};
@@ -73,19 +73,14 @@ fn main() {
                            &CompartmentOptions::default()) }
     );
     let global = global_root.handle();
-    let rcx = RJSContext {
-        cx: cx,
-        global: global,
-    };
+    let rcx = RJSContext::new(cx, global);
 
     eventloop::run(&rt, rcx, |handle| {
-        let privatebox: Box<RuntimePrivate> = Box::new(handle.downgrade());
-        unsafe { JS_SetRuntimePrivate(rt.rt(), Box::into_raw(privatebox) as *mut c_void) };
-
         let _ac = JSAutoCompartment::new(cx, global.get());
 
+        context::store_private(rt.cx(), &handle);
+
         let _ = unsafe { JS_InitStandardClasses(cx, global) };
-        // println!("JS_InitStandardClasses()");
 
         unsafe {
             let _ = puts.define_on(cx, global, 0);
@@ -112,7 +107,7 @@ fn main() {
         println!("script result: {}", str);
     });
 
-    let _: Box<RuntimePrivate> = unsafe { Box::from_raw(JS_GetRuntimePrivate(rt.rt()) as *mut _) };
+    context::clear_private(rt.cx());
 }
 
 trait ToResult<T> {
@@ -268,7 +263,7 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
     if !success {
         return;
     }
-    rooted!(in(cx) let stackstr = jsval::StringValue(&mut *stackstr.get()));
+    rooted!(in(cx) let stackstr = jsval::StringValue(&*stackstr.get()));
     let stackstr = String::from_jsval(cx, stackstr.handle(), ())
         .to_result()
         .unwrap();
@@ -328,7 +323,8 @@ macro_rules! setprop {
 fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Event) {
     use glutin::Event::*;
 
-    fn set_mouse_scroll_delta(delta: MouseScrollDelta) {
+    let set_mouse_scroll_delta = |delta: glutin::MouseScrollDelta| {
+        use glutin::MouseScrollDelta::*;
         match delta {
             LineDelta(x, y) => {
                 setprop!(in(cx) (obj).deltakind = "line");
@@ -341,7 +337,7 @@ fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Even
                 setprop!(in(cx) (obj).y = y);
             }
         }
-    }
+    };
 
     match event {
         DeviceEvent { .. } => {
@@ -349,7 +345,6 @@ fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Even
         }
         WindowEvent { event, .. } => {
             use glutin::WindowEvent::*;
-            use glutin::MouseScrollDelta::*;
             setprop!(in(cx) (obj).kind = "window");
             match event {
                 Resized(w, h) => {
