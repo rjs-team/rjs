@@ -39,10 +39,6 @@ macro_rules! js_fn_raw {
         #[allow(non_snake_case)]
         unsafe extern "C" fn $name (cx: *mut JSContext, argc: u32, vp: *mut Value) -> bool {
             let args = CallArgs::from_vp(vp, argc);
-            //let rt = JS_GetRuntime(cx);
-            //let privatebox = JS_GetRuntimePrivate(rt)
-            //    as *const $crate::jslib::context::RuntimePrivate;
-            //let handle = (*privatebox).upgrade().unwrap();
             let handle = context::get_handle(cx).unwrap();
             let rcx = handle.get();
             assert!(rcx.cx == cx);

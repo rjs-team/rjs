@@ -76,9 +76,10 @@ fn main() {
     let rcx = RJSContext::new(cx, global);
 
     eventloop::run(&rt, rcx, |handle| {
+        let rcx = handle.get();
         let _ac = JSAutoCompartment::new(cx, global.get());
 
-        context::store_private(rt.cx(), &handle);
+        context::store_private(cx, &handle);
 
         let _ = unsafe { JS_InitStandardClasses(cx, global) };
 
@@ -88,8 +89,8 @@ fn main() {
             let _ = getFileSync.define_on(cx, global, 0);
             let _ = readDir.define_on(cx, global, 0);
 
-            Test::init_class(cx, global, HandleObject::null());
-            Window::init_class(cx, global, HandleObject::null());
+            Test::init_class(rcx, global, HandleObject::null());
+            Window::init_class(rcx, global, HandleObject::null());
         }
 
         rooted!(in(cx) let mut rval = UndefinedValue());
@@ -107,7 +108,8 @@ fn main() {
         println!("script result: {}", str);
     });
 
-    context::clear_private(rt.cx());
+    let _ac = JSAutoCompartment::new(cx, global.get());
+    context::clear_private(cx);
 }
 
 trait ToResult<T> {

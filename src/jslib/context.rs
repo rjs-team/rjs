@@ -1,27 +1,48 @@
 use jslib::eventloop;
-use mozjs::jsapi::{HandleObject, JSContext, JS_GetCompartmentPrivate, JS_SetCompartmentPrivate};
+use mozjs::jsapi::{HandleObject, JSContext, JSObject, JS_GetCompartmentPrivate,
+                   JS_SetCompartmentPrivate};
 use mozjs::rust::get_context_compartment;
 
 use std::collections::HashMap;
 use std::any::TypeId;
 use std::os::raw::c_void;
+use std::sync::RwLock;
 use std::ptr;
 
 pub struct RJSContext {
     pub cx: *mut JSContext,
     pub global: HandleObject,
-    cls_protos: HashMap<TypeId, ClassInfo>,
+    cls_protos: RwLock<HashMap<TypeId, ClassInfo>>,
 }
 
-struct ClassInfo {}
+#[derive(Copy, Clone)]
+pub struct ClassInfo {
+    pub constr: *mut JSObject,
+    pub prototype: *mut JSObject,
+}
 
 impl RJSContext {
     pub fn new(cx: *mut JSContext, global: HandleObject) -> RJSContext {
         RJSContext {
             cx: cx,
             global: global,
-            cls_protos: HashMap::new(),
+            cls_protos: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub fn get_classinfo_for<T: 'static>(&self) -> Option<ClassInfo> {
+        self.cls_protos
+            .read()
+            .unwrap()
+            .get(&TypeId::of::<T>())
+            .map(|c| *c)
+    }
+
+    pub fn set_classinfo_for<T: 'static>(&self, ci: ClassInfo) {
+        self.cls_protos
+            .write()
+            .unwrap()
+            .insert(TypeId::of::<T>(), ci);
     }
 }
 

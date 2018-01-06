@@ -1,20 +1,18 @@
 #![feature(const_fn)]
 #![feature(libc)]
-#![feature(trace_macros)]
 #![feature(fnbox)]
 #![feature(refcell_replace_swap)]
 // #![cfg(feature = "debugmozjs")]
 
-extern crate libc;
-extern crate mozjs;
-extern crate tokio_core;
-// extern crate tokio_timer;
-extern crate futures;
-//#[macro_use]
 #[macro_use]
 extern crate downcast;
+extern crate futures;
 extern crate lazy_static;
+extern crate libc;
+#[macro_use]
+extern crate mozjs;
 extern crate slab;
+extern crate tokio_core;
 
 #[cfg(test)]
 mod tests;

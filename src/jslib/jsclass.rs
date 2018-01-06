@@ -1,7 +1,9 @@
 use mozjs::jsapi::{HandleObject, JSClass, JSContext, JSFunctionSpec, JSNativeWrapper, JSObject,
-                   JSPropertySpec, JS_InitClass, JSCLASS_RESERVED_SLOTS_SHIFT};
+                   JSPropertySpec, JS_GetConstructor, JS_InitClass, JSCLASS_RESERVED_SLOTS_SHIFT};
 use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
 use jslib::jsfn::RJSFn;
+use jslib::context;
+use jslib::context::RJSContext;
 use libc::c_uint;
 use std::ptr;
 
@@ -38,10 +40,13 @@ pub const fn null_function() -> JSFunctionSpec {
 
 pub trait JSClassInitializer {
     unsafe fn init_class(
-        cx: *mut JSContext,
+        rcx: &RJSContext,
         obj: HandleObject,
         parent_proto: HandleObject,
-    ) -> *mut JSObject {
+    ) -> *mut JSObject
+    where
+        Self: Sized + 'static,
+    {
         let cls = Self::class();
         let constr = Self::constr();
         let (constrfn, constrnargs) = constr
@@ -52,8 +57,8 @@ pub trait JSClassInitializer {
         let static_props = Self::static_properties();
         let static_fns = Self::static_functions();
 
-        JS_InitClass(
-            cx,
+        rooted!(in(rcx.cx) let proto = JS_InitClass(
+            rcx.cx,
             obj,
             parent_proto,
             cls,
@@ -63,7 +68,16 @@ pub trait JSClassInitializer {
             fns,
             static_props,
             static_fns,
-        )
+        ));
+
+        let constr = JS_GetConstructor(rcx.cx, proto.handle());
+
+        rcx.set_classinfo_for::<Self>(context::ClassInfo {
+            constr: constr,
+            prototype: proto.get(),
+        });
+
+        proto.get()
     }
     fn class() -> *const JSClass;
     fn functions() -> *const JSFunctionSpec;
