@@ -89,8 +89,8 @@ fn main() {
             let _ = getFileSync.define_on(cx, global, 0);
             let _ = readDir.define_on(cx, global, 0);
 
-            Test::init_class(rcx, global, HandleObject::null());
-            Window::init_class(rcx, global, HandleObject::null());
+            Test::init_class(rcx, global);
+            Window::init_class(rcx, global);
         }
 
         rooted!(in(cx) let mut rval = UndefinedValue());
@@ -274,7 +274,7 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
 
 struct Test {}
 
-js_class!{ Test
+js_class!{ Test extends ()
     [JSCLASS_HAS_PRIVATE]
 
     @constructor
@@ -431,7 +431,7 @@ fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Even
     }
 }
 
-js_class!{ Window
+js_class!{ Window extends ()
     [JSCLASS_HAS_PRIVATE]
     private: Window,
 

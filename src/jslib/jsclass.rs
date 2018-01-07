@@ -3,7 +3,7 @@ use mozjs::jsapi::{HandleObject, JSClass, JSContext, JSFunctionSpec, JSNativeWra
 use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
 use jslib::jsfn::RJSFn;
 use jslib::context;
-use jslib::context::RJSContext;
+use jslib::context::{ClassInfo, RJSContext};
 use libc::c_uint;
 use std::ptr;
 
@@ -38,16 +38,29 @@ pub const fn null_function() -> JSFunctionSpec {
     }
 }
 
+pub trait GetJSClassInfo
+where
+    Self: Sized + 'static,
+{
+    fn class_info(rcx: &RJSContext) -> Option<context::ClassInfo>;
+}
+
+impl GetJSClassInfo for () {
+    fn class_info(rcx: &RJSContext) -> Option<context::ClassInfo> {
+        Some(ClassInfo {
+            constr: ptr::null_mut(),
+            prototype: ptr::null_mut(),
+        })
+    }
+}
+
 pub trait JSClassInitializer {
-    unsafe fn init_class(
-        rcx: &RJSContext,
-        obj: HandleObject,
-        parent_proto: HandleObject,
-    ) -> *mut JSObject
+    unsafe fn init_class(rcx: &RJSContext, obj: HandleObject) -> *mut JSObject
     where
         Self: Sized + 'static,
     {
         let cls = Self::class();
+        let parent_info = Self::parent_info(rcx).unwrap();
         let constr = Self::constr();
         let (constrfn, constrnargs) = constr
             .map(|c| (Some(c.func()), c.nargs()))
@@ -57,10 +70,12 @@ pub trait JSClassInitializer {
         let static_props = Self::static_properties();
         let static_fns = Self::static_functions();
 
+        rooted!(in(rcx.cx) let parent_proto = parent_info.prototype);
+
         rooted!(in(rcx.cx) let proto = JS_InitClass(
             rcx.cx,
             obj,
-            parent_proto,
+            parent_proto.handle(),
             cls,
             constrfn,
             constrnargs,
@@ -80,6 +95,13 @@ pub trait JSClassInitializer {
         proto.get()
     }
     fn class() -> *const JSClass;
+
+    // Get the ClassInfo for this class, if it has been defined already.
+    fn class_info(rcx: &RJSContext) -> Option<ClassInfo>;
+
+    // This unfortunately has to be provided by the macro in order for
+    // init_class to be able to obtain the parent prototype.
+    fn parent_info(rcx: &RJSContext) -> Option<ClassInfo>;
     fn functions() -> *const JSFunctionSpec;
     fn properties() -> *const JSPropertySpec;
     fn static_functions() -> *const JSFunctionSpec {
@@ -118,16 +140,16 @@ macro_rules! c_str {
 
 #[macro_export]
 macro_rules! js_class {
-    ($name:ident [$flags:expr] $($body:tt)*) => {
+    ($name:ident extends $parent:ty [$flags:expr] $($body:tt)*) => {
         //trace_macros!{true}
-        __jsclass_parse!{$name [$flags] [()] [] [] [] [] $($body)*}
+        __jsclass_parse!{$name [$parent] [$flags] [()] [] [] [] [] $($body)*}
     };
 }
 
 #[macro_export]
 macro_rules! __jsclass_parsed {
-    ($name:ident [$flags:expr] [$private:ty] [$($constr:tt)*] [$($fns:tt)*] [$($ops:tt)*]
-     [$($props:tt)*]) => {
+    ($name:ident [$parent:ty] [$flags:expr] [$private:ty] [$($constr:tt)*] [$($fns:tt)*]
+     [$($ops:tt)*] [$($props:tt)*]) => {
 
 $( __jsclass_toplevel!{_constr $constr} )*
 $( __jsclass_toplevel!{_fn $fns} )*
@@ -171,6 +193,15 @@ impl JSClassInitializer for $name {
         }
     }
 
+    fn class_info(rcx: &RJSContext) -> Option<$crate::jslib::context::ClassInfo> {
+        rcx.get_classinfo_for::<Self>()
+    }
+
+    fn parent_info(rcx: &RJSContext) -> Option<$crate::jslib::context::ClassInfo> {
+        use $crate::jslib::jsclass::GetJSClassInfo;
+        //rcx.get_classinfo_for::<$parent>()
+        <$parent>::class_info(rcx)
+    }
 
     fn constr() -> Option<Box<RJSFn>> {
 
@@ -229,38 +260,38 @@ macro_rules! nothing {
 
 #[macro_export]
 macro_rules! __jsclass_parse {
-    ($cname:ident $flags:tt $private:tt $constr:tt $fns:tt $ops:tt $props:tt ) => {
-        __jsclass_parsed!{$cname $flags $private $constr $fns $ops $props}
+    ($cname:ident $parent:tt $flags:tt $private:tt $constr:tt $fns:tt $ops:tt $props:tt ) => {
+        __jsclass_parsed!{$cname $parent $flags $private $constr $fns $ops $props}
     };
-    ($cname:ident $flags:tt [$private:ty] $constr:tt $fns:tt $ops:tt $props:tt
+    ($cname:ident $parent:tt $flags:tt [$private:ty] $constr:tt $fns:tt $ops:tt $props:tt
      private: $ty:ty, $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags [$ty] $constr $fns $ops $props
+        __jsclass_parse!{$cname $parent $flags [$ty] $constr $fns $ops $props
         $($rest)*}
     };
-    ($cname:ident $flags:tt $private:tt $constr:tt [$($fns:tt)*] $ops:tt $props:tt
+    ($cname:ident $parent:tt $flags:tt $private:tt $constr:tt [$($fns:tt)*] $ops:tt $props:tt
      fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags $private $constr [$($fns)*
+        __jsclass_parse!{$cname $parent $flags $private $constr [$($fns)*
             [fn $name $args -> JSRet<$ret> { $($body)* }]
         ] $ops $props
         $($rest)*}
     };
-    ($cname:ident $flags:tt $private:tt [$($constr:tt)*] $fns:tt $ops:tt $props:tt
+    ($cname:ident $parent:tt $flags:tt $private:tt [$($constr:tt)*] $fns:tt $ops:tt $props:tt
      @constructor fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags $private [$($constr)*
+        __jsclass_parse!{$cname $parent $flags $private [$($constr)*
             [fn $name $args -> JSRet<$ret> { $($body)* }]
         ] $fns $ops $props
         $($rest)*}
     };
-    ($cname:ident $flags:tt $private:tt $constr:tt $fns:tt [$($ops:tt)*] $props:tt
+    ($cname:ident $parent:tt $flags:tt $private:tt $constr:tt $fns:tt [$($ops:tt)*] $props:tt
      @op($op:ident) fn $name:ident $args:tt -> $ret:ty {$($body:tt)*} $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags $private $constr $fns [$($ops)*
+        __jsclass_parse!{$cname $parent $flags $private $constr $fns [$($ops)*
             [$op fn $name $args -> $ret { $($body)* }]
         ] $props
         $($rest)*}
     };
-    ($cname:ident $flags:tt $private:tt $constr:tt $fns:tt $ops:tt [$($props:tt)*]
+    ($cname:ident $parent:tt $flags:tt $private:tt $constr:tt $fns:tt $ops:tt [$($props:tt)*]
      @prop $name:ident $body:tt $($rest:tt)*) => {
-        __jsclass_parse!{$cname $flags $private $constr $fns $ops [$($props)*
+        __jsclass_parse!{$cname $parent $flags $private $constr $fns $ops [$($props)*
             [$name $body]
         ]
         $($rest)*}
