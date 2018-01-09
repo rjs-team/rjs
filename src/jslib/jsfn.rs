@@ -130,6 +130,10 @@ macro_rules! js_unpack_args {
         js_unpack_args!({$fn, $rcx, $remote, $callargs} ($($args)*));
     };
     ({$fn:expr, $rcx:expr, $remote:expr, $callargs:expr} ($($args:tt)*)) => {
+        #[cfg_attr(feature = "cargo-clippy", allow(useless_attribute))]
+        #[allow(unused)]
+        use mozjs::conversions::FromJSValConvertible;
+
         if $callargs._base.argc_ != _js_unpack_args_count!($($args)*,) {
             return Err(Some(format!("{}() requires exactly {} argument", $fn,
                 _js_unpack_args_count!($($args)*,)).into()));
@@ -144,6 +148,12 @@ macro_rules! _js_unpack_args_count {
         0
     };
     ($name:ident: @$special:ident, $($args:tt)*) => {
+        _js_unpack_args_count!($($args)*)
+    };
+    ($name:ident: @$special:ident $type:ty, $($args:tt)*) => {
+        _js_unpack_args_count!($($args)*)
+    };
+    ($name:ident: @$special:ident $type:ty {$opt:expr}, $($args:tt)*) => {
         _js_unpack_args_count!($($args)*)
     };
     ($name:ident: &RJSContext, $($args:tt)*) => {
@@ -173,8 +183,18 @@ macro_rules! _js_unpack_args_unwrap_args {
     };
     // special: @this
     (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
-     $name:ident : @this, $($args:tt)*) => {
-        let $name = $callargs.thisv();
+     $name:ident : @this $type:ty, $($args:tt)*) => {
+        let $name = unsafe {
+            <$type as FromJSValConvertible>::from_jsval($rcx.cx, $callargs.thisv(), ())
+                .to_result()? };
+        _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
+    };
+    // special: @this with options
+    (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
+     $name:ident : @this $type:ty {$opt:expr}, $($args:tt)*) => {
+        let $name = unsafe {
+            <$type as FromJSValConvertible>::from_jsval($rcx.cx, $callargs.thisv(), $opt)
+                .to_result()? };
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
     };
     // RJSContext
@@ -198,13 +218,17 @@ macro_rules! _js_unpack_args_unwrap_args {
     // options
     (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
      $name:ident : $type:ty {$opt:expr}, $($args:tt)*) => {
-        let $name = unsafe { <$type>::from_jsval($rcx.cx, $callargs.get($n), $opt).to_result()? };
+        let $name = unsafe {
+            <$type as FromJSValConvertible>::from_jsval($rcx.cx, $callargs.get($n), $opt)
+                .to_result()? };
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n+1) $($args)*);
     };
     // no options
     (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
      $name:ident : $type:ty, $($args:tt)*) => {
-        let $name = unsafe { <$type>::from_jsval($rcx.cx, $callargs.get($n), ()).to_result()? };
+        let $name = unsafe {
+            <$type as FromJSValConvertible>::from_jsval($rcx.cx, $callargs.get($n), ())
+                .to_result()? };
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n+1) $($args)*);
     };
 }

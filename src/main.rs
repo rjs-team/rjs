@@ -1,8 +1,10 @@
 #![feature(fnbox)]
 #![feature(const_fn)]
 #![feature(libc)]
+#![feature(alloc)]
 #![recursion_limit = "100"]
 
+extern crate alloc;
 extern crate futures;
 extern crate gl;
 extern crate glutin;
@@ -25,9 +27,9 @@ use jsval::{JSVal, ObjectValue, UndefinedValue};
 use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConvertible,
                          ToJSValConvertible};
 use mozjs::jsapi::{Handle, HandleObject, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper,
-                   JSPropertySpec, JS_GetInstancePrivate, JS_GetPrivate, JS_GetProperty,
-                   JS_InitStandardClasses, JS_NewPlainObject, JS_SetPrivate, JS_SetProperty,
-                   JSPROP_ENUMERATE, JSPROP_SHARED};
+                   JSPropertySpec, JS_GetPrivate, JS_GetProperty, JS_InitStandardClasses,
+                   JS_NewPlainObject, JS_SetPrivate, JS_SetProperty, JSPROP_ENUMERATE,
+                   JSPROP_SHARED};
 use mozjs::jsapi;
 use mozjs::jsval::NullValue;
 use mozjs::jsval;
@@ -50,6 +52,11 @@ use std::sync::{Once, ONCE_INIT};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio_core::reactor::{Core, Timeout};
+use gl::types::*;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::marker::PhantomData;
+use std::fmt::Debug;
 
 fn main() {
     let filename = env::args()
@@ -91,6 +98,10 @@ fn main() {
 
             Test::init_class(rcx, global);
             Window::init_class(rcx, global);
+            WebGLShader::init_class(rcx, global);
+            WebGLProgram::init_class(rcx, global);
+            WebGLBuffer::init_class(rcx, global);
+            WebGLUniformLocation::init_class(rcx, global);
         }
 
         rooted!(in(cx) let mut rval = UndefinedValue());
@@ -309,6 +320,22 @@ impl Window {
     {
         let _ = self.send_msg.unbounded_send(WindowMsg::Do(Box::new(f)));
     }
+
+    fn sync_do_on_thread<F, R: Debug + Send + 'static>(&self, f: F) -> R
+    where
+        F: for<'r> FnBox(&'r glutin::GlWindow) -> R + Send + 'static,
+    {
+        let fbox = Box::new(f);
+
+        let (send, recv) = futures::sync::oneshot::channel();
+
+        self.do_on_thread(move |win: &glutin::GlWindow| {
+            let out = fbox.call_box((win,));
+            send.send(out).unwrap();
+        });
+
+        recv.wait().unwrap()
+    }
 }
 
 macro_rules! setprop {
@@ -431,6 +458,161 @@ fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Even
     }
 }
 
+pub struct Object<T: JSClassInitializer> {
+    obj: *mut JSObject,
+    marker: PhantomData<T>,
+}
+
+impl<T: JSClassInitializer> Object<T> {
+    fn jsobj(&self) -> *mut JSObject {
+        self.obj
+    }
+
+    fn private(&self) -> &T::Private {
+        // private has already been verified by from_jsval
+        unsafe { &*(JS_GetPrivate(self.obj) as *const _) }
+    }
+}
+
+impl<T: JSClassInitializer> FromJSValConvertible for Object<T> {
+    type Config = ();
+
+    unsafe fn from_jsval(
+        cx: *mut JSContext,
+        value: HandleValue,
+        _: (),
+    ) -> Result<ConversionResult<Object<T>>, ()> {
+        use alloc::borrow::Cow;
+
+        if !value.is_object() {
+            return Ok(ConversionResult::Failure(Cow::Borrowed(
+                "value is not an object",
+            )));
+        }
+
+        let obj = value.to_object();
+
+        if !jsapi::JS_InstanceOf(
+            cx,
+            Handle::from_marked_location(&obj),
+            T::class(),
+            ptr::null_mut(),
+        ) {
+            return Ok(ConversionResult::Failure(Cow::Borrowed(
+                "value is not instanceof the class",
+            )));
+        }
+
+        let private = JS_GetPrivate(obj);
+        if private.is_null() {
+            return Ok(ConversionResult::Failure(Cow::Borrowed(
+                "value has no private",
+            )));
+        }
+
+        Ok(ConversionResult::Success(Object {
+            obj: obj,
+            marker: PhantomData,
+        }))
+    }
+}
+
+pub struct WebGLShader {
+    id: Arc<AtomicUsize>,
+}
+
+js_class!{ WebGLShader extends ()
+    [JSCLASS_HAS_PRIVATE]
+    private: WebGLShader,
+
+    @constructor
+    fn WebGLShader_constr() -> JSRet<*mut JSObject> {
+        Ok(ptr::null_mut())
+    }
+    @op(finalize)
+    fn WebGLShader_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
+        let private = JS_GetPrivate(this);
+        if private.is_null() {
+            return
+        }
+
+        JS_SetPrivate(this, ptr::null_mut() as *mut _);
+        let _ = Box::from_raw(private as *mut WebGLShader);
+    }
+}
+
+pub struct WebGLProgram {
+    id: Arc<AtomicUsize>,
+}
+
+js_class!{ WebGLProgram extends ()
+    [JSCLASS_HAS_PRIVATE]
+    private: WebGLProgram,
+
+    @constructor
+    fn WebGLProgram_constr() -> JSRet<*mut JSObject> {
+        Ok(ptr::null_mut())
+    }
+    @op(finalize)
+    fn WebGLProgram_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
+        let private = JS_GetPrivate(this);
+        if private.is_null() {
+            return
+        }
+
+        JS_SetPrivate(this, ptr::null_mut() as *mut _);
+        let _ = Box::from_raw(private as *mut WebGLProgram);
+    }
+}
+
+pub struct WebGLBuffer {
+    id: Arc<AtomicUsize>,
+}
+
+js_class!{ WebGLBuffer extends ()
+    [JSCLASS_HAS_PRIVATE]
+    private: WebGLBuffer,
+
+    @constructor
+    fn WebGLBuffer_constr() -> JSRet<*mut JSObject> {
+        Ok(ptr::null_mut())
+    }
+    @op(finalize)
+    fn WebGLBuffer_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
+        let private = JS_GetPrivate(this);
+        if private.is_null() {
+            return
+        }
+
+        JS_SetPrivate(this, ptr::null_mut() as *mut _);
+        let _ = Box::from_raw(private as *mut WebGLBuffer);
+    }
+}
+
+pub struct WebGLUniformLocation {
+    loc: Arc<AtomicUsize>,
+}
+
+js_class!{ WebGLUniformLocation extends ()
+    [JSCLASS_HAS_PRIVATE]
+    private: WebGLUniformLocation,
+
+    @constructor
+    fn WebGLUniformLocation_constr() -> JSRet<*mut JSObject> {
+        Ok(ptr::null_mut())
+    }
+    @op(finalize)
+    fn WebGLUniformLocation_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
+        let private = JS_GetPrivate(this);
+        if private.is_null() {
+            return
+        }
+
+        JS_SetPrivate(this, ptr::null_mut() as *mut _);
+        let _ = Box::from_raw(private as *mut WebGLUniformLocation);
+    }
+}
+
 js_class!{ Window extends ()
     [JSCLASS_HAS_PRIVATE]
     private: Window,
@@ -509,38 +691,32 @@ js_class!{ Window extends ()
         Ok(jswin)
     }
 
-    fn getContext(this: @this, str: String) -> JSRet<*mut JSObject> {
+    fn getContext(this: @this Object<Window>, str: String) -> JSRet<*mut JSObject> {
         println!("getContext: {}", str);
-        Ok(this.to_object())
+        Ok(this.jsobj())
     }
 
-    fn ping(this: @this, rcx: &RJSContext, args: CallArgs) -> JSRet<()> {
-        let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
-
+    fn ping(this: @this Object<Window>) -> JSRet<()> {
         println!("ping");
 
-        if let Err(e) = win.send_msg.unbounded_send(WindowMsg::Ping) {
+        if let Err(e) = this.private().send_msg.unbounded_send(WindowMsg::Ping) {
             println!("ping failed: {}", e);
         }
 
         Ok(())
     }
 
-    fn close(this: @this, rcx: &RJSContext, args: CallArgs) -> JSRet<()> {
-        let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
-
-        if let Err(e) = win.send_msg.unbounded_send(WindowMsg::Close) {
+    fn close(this: @this Object<Window>) -> JSRet<()> {
+        if let Err(e) = this.private().send_msg.unbounded_send(WindowMsg::Close) {
             println!("close failed: {}", e);
         }
 
         Ok(())
     }
 
-    fn clearColor(this: @this, rcx: &RJSContext, args: CallArgs, r: f32, g: f32, b: f32, a: f32)
+    fn clearColor(this: @this Object<Window>, r: f32, g: f32, b: f32, a: f32)
         -> JSRet<()> {
-        let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
-
-        win.do_on_thread(
+        this.private().do_on_thread(
             move |_: &glutin::GlWindow| {
                 unsafe { gl::ClearColor(r, g, b, a) };
             });
@@ -548,11 +724,9 @@ js_class!{ Window extends ()
         Ok(())
     }
 
-    fn clear(this: @this, rcx: &RJSContext, args: CallArgs, mask: u32 {ConversionBehavior::Default})
+    fn clear(this: @this Object<Window>, mask: u32 {ConversionBehavior::Default})
         -> JSRet<()> {
-        let win = Window::get_private(rcx.cx, this, Some(args)).unwrap();
-
-        win.do_on_thread(
+        this.private().do_on_thread(
             move |_: &glutin::GlWindow| {
                 unsafe { gl::Clear(mask) };
             });
@@ -560,11 +734,260 @@ js_class!{ Window extends ()
         Ok(())
     }
 
+    fn createShader(this: @this Object<Window>, rcx: &RJSContext,
+                    shadertype: GLenum {ConversionBehavior::Default})
+                   -> JSRet<*mut JSObject> {
+        let shader_priv = Box::new(WebGLShader {
+            id: Arc::new(AtomicUsize::new(0)),
+        });
+
+        let idref = Arc::clone(&shader_priv.id);
+
+        let shader = WebGLShader::jsnew_with_private(
+            rcx, Box::into_raw(shader_priv) as *mut WebGLShader);
+        rooted!(in(rcx.cx) let shader = shader);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = unsafe { gl::CreateShader(shadertype) };
+                idref.store(id as usize, Ordering::Relaxed);
+            });
+
+        Ok(shader.get())
+    }
+
+    fn shaderSource(this: @this Object<Window>, shader: Object<WebGLShader>, source: String)
+        -> JSRet<()> {
+        let idref = Arc::clone(&shader.private().id);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = idref.load(Ordering::Relaxed);
+                unsafe { gl::ShaderSource(id as u32,
+                                          1,
+                                          &(source.as_ptr() as *const _),
+                                          &(source.len() as _)) };
+            });
+
+        Ok(())
+    }
+
+    fn compileShader(this: @this Object<Window>, shader: Object<WebGLShader>)
+        -> JSRet<()> {
+        let idref = Arc::clone(&shader.private().id);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = idref.load(Ordering::Relaxed);
+                unsafe { gl::CompileShader(id as u32) };
+            });
+
+        Ok(())
+    }
+
+    fn getShaderParameter(this: @this Object<Window>, shader: Object<WebGLShader>,
+                          param: GLenum {ConversionBehavior::Default})
+                         -> JSRet<JSVal> {
+        let idref = Arc::clone(&shader.private().id);
+
+        let out = this.private().sync_do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = idref.load(Ordering::Relaxed);
+                let mut out = -1;
+                unsafe { gl::GetShaderiv(id as u32, param, &mut out) };
+                out
+            });
+
+        match param {
+            gl::COMPILE_STATUS => Ok(jsval::BooleanValue(out > 0)),
+            gl::DELETE_STATUS => Ok(jsval::BooleanValue(out > 0)),
+            _ => Ok(jsval::Int32Value(out)),
+        }
+    }
+
+    fn createProgram(this: @this Object<Window>, rcx: &RJSContext)
+        -> JSRet<*mut JSObject> {
+        let program_priv = Box::new(WebGLProgram {
+            id: Arc::new(AtomicUsize::new(0)),
+        });
+
+        let idref = Arc::clone(&program_priv.id);
+
+        let program = WebGLProgram::jsnew_with_private(
+            rcx, Box::into_raw(program_priv) as *mut WebGLProgram);
+        rooted!(in(rcx.cx) let program = program);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = unsafe { gl::CreateProgram() };
+                idref.store(id as usize, Ordering::Relaxed);
+            });
+
+        Ok(program.get())
+    }
+
+    fn attachShader(this: @this Object<Window>, program: Object<WebGLProgram>,
+                    shader: Object<WebGLShader>)
+                   -> JSRet<()> {
+        let progidref = Arc::clone(&program.private().id);
+        let shaderidref = Arc::clone(&shader.private().id);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let prog = progidref.load(Ordering::Relaxed);
+                let shader = shaderidref.load(Ordering::Relaxed);
+                unsafe { gl::AttachShader(prog as u32, shader as u32) };
+            });
+
+        Ok(())
+    }
+
+    fn linkProgram(this: @this Object<Window>, program: Object<WebGLProgram>)
+        -> JSRet<()> {
+        let progidref = Arc::clone(&program.private().id);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let prog = progidref.load(Ordering::Relaxed);
+                unsafe { gl::LinkProgram(prog as u32) };
+            });
+
+        Ok(())
+    }
+
+    fn getProgramParameter(this: @this Object<Window>, program: Object<WebGLProgram>,
+                           param: GLenum {ConversionBehavior::Default})
+                          -> JSRet<JSVal> {
+        let idref = Arc::clone(&program.private().id);
+
+        let out = this.private().sync_do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = idref.load(Ordering::Relaxed);
+                let mut out = -1;
+                unsafe { gl::GetProgramiv(id as u32, param, &mut out) };
+                out
+            });
+
+        match param {
+            gl::LINK_STATUS => Ok(jsval::BooleanValue(out > 0)),
+            gl::DELETE_STATUS => Ok(jsval::BooleanValue(out > 0)),
+            gl::VALIDATE_STATUS => Ok(jsval::BooleanValue(out > 0)),
+            _ => Ok(jsval::Int32Value(out)),
+        }
+    }
+
+    fn useProgram(this: @this Object<Window>, program: Object<WebGLProgram>)
+        -> JSRet<()> {
+        let progidref = Arc::clone(&program.private().id);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let prog = progidref.load(Ordering::Relaxed);
+                unsafe { gl::UseProgram(prog as u32) };
+            });
+
+        Ok(())
+    }
+
+    fn getAttribLocation(this: @this Object<Window>, program: Object<WebGLProgram>, name: String)
+        -> JSRet<i32> {
+        let idref = Arc::clone(&program.private().id);
+
+        let name = CString::new(name).unwrap();
+
+        Ok(this.private().sync_do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = idref.load(Ordering::Relaxed);
+                unsafe { gl::GetAttribLocation(id as u32, name.as_ptr()) }
+            }))
+    }
+
+    fn enableVertexAttribArray(this: @this Object<Window>, index: u32 {ConversionBehavior::Default})
+        -> JSRet<()> {
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                unsafe { gl::EnableVertexAttribArray(index) };
+            });
+
+        Ok(())
+    }
+
+    fn disableVertexAttribArray(this: @this Object<Window>,
+                                index: u32 {ConversionBehavior::Default})
+                               -> JSRet<()> {
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                unsafe { gl::DisableVertexAttribArray(index) };
+            });
+
+        Ok(())
+    }
+
+    fn getUniformLocation(this: @this Object<Window>, rcx: &RJSContext,
+                          program: Object<WebGLProgram>, name: String)
+                         -> JSRet<*mut JSObject> {
+        let ul_priv = Box::new(WebGLUniformLocation {
+            loc: Arc::new(AtomicUsize::new(0)),
+        });
+
+        let idref = Arc::clone(&program.private().id);
+        let locref = Arc::clone(&ul_priv.loc);
+
+        let name = CString::new(name).unwrap();
+
+        let ul = WebGLUniformLocation::jsnew_with_private(
+            rcx, Box::into_raw(ul_priv) as *mut WebGLUniformLocation);
+        rooted!(in(rcx.cx) let ul = ul);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = idref.load(Ordering::Relaxed);
+
+                let loc = unsafe { gl::GetUniformLocation(id as u32, name.as_ptr()) };
+                locref.store(loc as usize, Ordering::Relaxed);
+            });
+
+        Ok(ul.get())
+    }
+
+    fn createBuffer(this: @this Object<Window>, rcx: &RJSContext)
+        -> JSRet<*mut JSObject> {
+        let buffer_priv = Box::new(WebGLBuffer {
+            id: Arc::new(AtomicUsize::new(0)),
+        });
+
+        let idref = Arc::clone(&buffer_priv.id);
+
+        let buffer = WebGLBuffer::jsnew_with_private(
+            rcx, Box::into_raw(buffer_priv) as *mut WebGLBuffer);
+        rooted!(in(rcx.cx) let buffer = buffer);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let mut buffer = 0;
+                unsafe { gl::CreateBuffers(1, &mut buffer) };
+                idref.store(buffer as usize, Ordering::Relaxed);
+            });
+
+        Ok(buffer.get())
+    }
+
+    fn bindBuffer(this: @this Object<Window>, target: GLenum {ConversionBehavior::Default},
+                  buffer: Object<WebGLBuffer>)
+                 -> JSRet<()> {
+        let idref = Arc::clone(&buffer.private().id);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = idref.load(Ordering::Relaxed);
+                unsafe { gl::BindBuffer(target, id as u32) }
+            });
+
+        Ok(())
+    }
+
     @op(finalize)
     fn Window_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
-        //let rt = (*free).runtime_;
-        //let cx = JS_GetContext(rt);
-
         let private = JS_GetPrivate(this);
         if private.is_null() {
             return

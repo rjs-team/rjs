@@ -1,5 +1,7 @@
-use mozjs::jsapi::{HandleObject, JSClass, JSContext, JSFunctionSpec, JSNativeWrapper, JSObject,
-                   JSPropertySpec, JS_GetConstructor, JS_InitClass, JSCLASS_RESERVED_SLOTS_SHIFT};
+use mozjs::jsapi::{CallArgs, Handle, HandleObject, JSClass, JSContext, JSFunctionSpec,
+                   JSNativeWrapper, JSObject, JSPropertySpec, JS_GetConstructor,
+                   JS_GetInstancePrivate, JS_InitClass, JS_SetPrivate,
+                   JSCLASS_RESERVED_SLOTS_SHIFT};
 use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
 use jslib::jsfn::RJSFn;
 use jslib::context;
@@ -46,7 +48,7 @@ where
 }
 
 impl GetJSClassInfo for () {
-    fn class_info(rcx: &RJSContext) -> Option<context::ClassInfo> {
+    fn class_info(_rcx: &RJSContext) -> Option<context::ClassInfo> {
         Some(ClassInfo {
             constr: ptr::null_mut(),
             prototype: ptr::null_mut(),
@@ -55,6 +57,8 @@ impl GetJSClassInfo for () {
 }
 
 pub trait JSClassInitializer {
+    type Private;
+
     unsafe fn init_class(rcx: &RJSContext, obj: HandleObject) -> *mut JSObject
     where
         Self: Sized + 'static,
@@ -113,6 +117,48 @@ pub trait JSClassInitializer {
     fn constr() -> Option<Box<RJSFn>> {
         None
     }
+
+    fn get_private<'a>(
+        cx: *mut JSContext,
+        obj: HandleObject,
+        args: Option<CallArgs>,
+    ) -> Option<&'a Self::Private> {
+        unsafe {
+            let ptr = JS_GetInstancePrivate(
+                cx,
+                obj,
+                Self::class(),
+                args.map_or(ptr::null_mut(), |mut args| &mut args),
+            ) as *const Self::Private;
+            if ptr.is_null() {
+                None
+            } else {
+                Some(&*ptr)
+            }
+        }
+    }
+
+    fn jsnew_with_private(rcx: &RJSContext, private: *mut Self::Private) -> *mut JSObject
+    where
+        Self: Sized + 'static,
+    {
+        let info = rcx.get_classinfo_for::<Self>()
+            .expect(&format!("{} must be defined in this compartment!", "?"));
+
+        let jsobj = unsafe {
+            ::mozjs::jsapi::JS_NewObjectWithGivenProto(
+                rcx.cx,
+                Self::class(),
+                Handle::from_marked_location(&info.prototype),
+            )
+        };
+
+        unsafe {
+            JS_SetPrivate(jsobj, private as *mut ::std::os::raw::c_void);
+        }
+
+        jsobj
+    }
 }
 
 #[macro_export]
@@ -157,28 +203,10 @@ $( __jsclass_toplevel!{_op $ops} )*
 $( __jsclass_toplevel!{_prop $props} )*
 
 
-impl $name {
-
-    #[allow(dead_code)]
-    fn get_private<'a>(cx: *mut JSContext,
-                   obj: HandleValue,
-                   args: Option<CallArgs>) -> Option<&'a $private> {
-        unsafe {
-            let ptr = JS_GetInstancePrivate(cx,
-                                            Handle::from_marked_location(&obj.to_object()),
-                                            Self::class(),
-                                            args.map_or(ptr::null_mut(), |mut args| &mut args)
-                                            ) as *const $private;
-            if ptr.is_null() {
-                None
-            } else {
-                Some(&*ptr)
-            }
-        }
-    }
-}
 
 impl JSClassInitializer for $name {
+    type Private = $private;
+
     fn class() -> *const JSClass {
         compute_once!{
             *const JSClass = ptr::null();
