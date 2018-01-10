@@ -321,11 +321,16 @@ impl Window {
         let _ = self.send_msg.unbounded_send(WindowMsg::Do(Box::new(f)));
     }
 
-    fn sync_do_on_thread<F, R: Debug + Send + 'static>(&self, f: F) -> R
+    fn sync_do_on_thread<F, R>(&self, f: F) -> R
     where
-        F: for<'r> FnBox(&'r glutin::GlWindow) -> R + Send + 'static,
+        F: for<'r> FnBox(&'r glutin::GlWindow) -> R + Send,
+        R: Debug + Send + 'static,
     {
-        let fbox = Box::new(f);
+        // using transmute to force adding 'static, since this function is
+        // enforcing a shorter lifetime
+        let fbox: Box<for<'r> FnBox(&'r glutin::GlWindow) -> R + Send> = Box::new(f);
+        let fbox: Box<for<'r> FnBox(&'r glutin::GlWindow) -> R + Send + 'static> =
+            unsafe { ::std::mem::transmute(fbox) };
 
         let (send, recv) = futures::sync::oneshot::channel();
 
@@ -923,6 +928,29 @@ js_class!{ Window extends ()
         Ok(())
     }
 
+    fn vertexAttribPointer(this: @this Object<Window>,
+                           index: GLuint {ConversionBehavior::Default},
+                           size: GLint {ConversionBehavior::Default},
+                           type_: GLenum {ConversionBehavior::Default},
+                           normalized: bool,
+                           stride: GLsizei {ConversionBehavior::Default},
+                           offset: u32 {ConversionBehavior::Default})
+        -> JSRet<()>{
+        // TODO: Validate these values
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                unsafe { gl::VertexAttribPointer(
+                            index,
+                            size,
+                            type_,
+                            normalized as u8,
+                            stride,
+                            offset as *const _) };
+            });
+
+        Ok(())
+    }
+
     fn getUniformLocation(this: @this Object<Window>, rcx: &RJSContext,
                           program: Object<WebGLProgram>, name: String)
                          -> JSRet<*mut JSObject> {
@@ -981,6 +1009,125 @@ js_class!{ Window extends ()
             move |_: &glutin::GlWindow| {
                 let id = idref.load(Ordering::Relaxed);
                 unsafe { gl::BindBuffer(target, id as u32) }
+            });
+
+        Ok(())
+    }
+
+    fn bufferData(rcx: &RJSContext,
+                  this: @this Object<Window>,
+                  target: GLenum {ConversionBehavior::Default},
+                  data: JSVal,
+                  usage: GLenum {ConversionBehavior::Default})
+                 -> JSRet<()> {
+        if !data.is_object() {
+            return Err(Some("data is not an object. size?".to_owned()));
+        }
+
+        rooted!(in(rcx.cx) let obj = data.to_object());
+
+        typedarray!(in(rcx.cx) let buf: ArrayBuffer = obj.get());
+        typedarray!(in(rcx.cx) let view: ArrayBufferView = obj.get());
+
+        // This construct looks ugly, but it should avoid having to copy the buffer data
+        // TODO: Should we always do this? For small amounts of data it might be faster
+        //       to copy and let the thread continue.
+
+        let do_it = |slice: &[u8]| {
+            this.private().sync_do_on_thread(
+                move |_: &glutin::GlWindow| {
+                    unsafe { gl::BufferData(target,
+                                            slice.len() as isize,
+                                            slice.as_ptr() as *const _,
+                                            usage) }
+                });
+        };
+
+        if let Ok(mut buf) = buf {
+            do_it(unsafe { buf.as_slice() })
+        } else if let Ok(mut view) = view {
+            do_it(unsafe { view.as_slice() })
+        } else {
+            panic!("Not ArrayBuffer or ArrayBufferView");
+        };
+
+
+        Ok(())
+    }
+
+    fn uniformMatrix4fv(rcx: &RJSContext,
+                  this: @this Object<Window>,
+                  location: Object<WebGLUniformLocation>,
+                  transpose: bool,
+                  value: *mut JSObject)
+                 -> JSRet<()> {
+        typedarray!(in(rcx.cx) let view: Float32Array = value);
+
+        // Since this should always be given 16 element arrays, just always copy them
+
+        let data = if let Ok(mut view) = view {
+            unsafe { view.as_slice().to_vec() }
+        } else {
+            rooted!(in(rcx.cx) let value = ObjectValue(value));
+            unsafe { Vec::<f32>::from_jsval(rcx.cx, value.handle(), ()).to_result()? }
+        };
+
+        let locidref = Arc::clone(&location.private().loc);
+
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let loc = locidref.load(Ordering::Relaxed);
+                unsafe { gl::UniformMatrix4fv(loc as i32,
+                                              1,
+                                              transpose as GLboolean,
+                                              data.as_ptr()) }
+            });
+
+        Ok(())
+    }
+
+    fn enable(this: @this Object<Window>, cap: GLenum {ConversionBehavior::Default})
+        -> JSRet<()> {
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                unsafe { gl::Enable(cap) };
+            });
+
+        Ok(())
+    }
+
+    fn disable(this: @this Object<Window>, cap: GLenum {ConversionBehavior::Default})
+        -> JSRet<()> {
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                unsafe { gl::Disable(cap) };
+            });
+
+        Ok(())
+    }
+
+    fn viewport(this: @this Object<Window>,
+                x: GLint {ConversionBehavior::Default},
+                y: GLint {ConversionBehavior::Default},
+                width: GLsizei {ConversionBehavior::Default},
+                height: GLsizei {ConversionBehavior::Default})
+        -> JSRet<()> {
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                unsafe { gl::Viewport(x, y, width, height) };
+            });
+
+        Ok(())
+    }
+
+    fn drawArrays(this: @this Object<Window>,
+                  mode: GLenum {ConversionBehavior::Default},
+                  first: GLint {ConversionBehavior::Default},
+                  count: GLsizei {ConversionBehavior::Default})
+        -> JSRet<()> {
+        this.private().do_on_thread(
+            move |_: &glutin::GlWindow| {
+                unsafe { gl::DrawArrays(mode, first, count) };
             });
 
         Ok(())
