@@ -23,7 +23,7 @@ function execModule(module, __file__) {
   eval(__source__);
   return module.exports;
 }
-glMatrix = execModule({}, "examples/webgl/gl-matrix-min.js");
+glMatrix = execModule({}, "examples/webgl/gl-matrix.js");
 puts(JSON.stringify(Object.keys(glMatrix)));
 mat4 = glMatrix.mat4;
 
@@ -34,8 +34,30 @@ var gl;
 function initGL(canvas) {
   try {
     gl = canvas.getContext("experimental-webgl");
-    gl.viewportWidth = canvas.width;
-    gl.viewportHeight = canvas.height;
+    gl.viewportWidth = canvas.width = 1024;
+    gl.viewportHeight = canvas.height = 768;
+    puts(JSON.stringify(gl.__proto__));
+
+    gl = new Proxy(gl, {
+      get: function(target, name) {
+        if (name in target) {
+          let val = target[name];
+          if (val instanceof Function)
+            return function() {
+              let ret = target[name].apply(target, arguments);
+              let err = target.getError();
+              puts("gl."+name+"(" + Array.prototype.slice.call(arguments).map(x => "" + x).join(', ') + "): " + ret);
+              if (err != 0) {
+                puts("GL error: " + err.toString(16));
+              }
+              return ret;
+            };
+          return val;
+        }
+        puts("Missing property: " + name);
+        return function(){};
+      },
+    });
   } catch (e) {
   }
   if (!gl) {
@@ -122,29 +144,29 @@ function initBuffers() {
 function drawScene() {
   gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0, pMatrix);
+  mat4.perspective(pMatrix, 45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0);
   mat4.identity(mvMatrix);
-  mat4.translate(mvMatrix, [-1.5, 0.0, -7.0]);
+  mat4.translate(mvMatrix, mvMatrix, [-1.5, 0.0, -7.0]);
   gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, triangleVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
-  setMatrixUniforms();
-  gl.drawArrays(gl.TRIANGLES, 0, triangleVertexPositionBuffer.numItems);
-  mat4.translate(mvMatrix, [3.0, 0.0, 0.0]);
+  //setMatrixUniforms();
+  /*gl.drawArrays(gl.TRIANGLES, 0, triangleVertexPositionBuffer.numItems);
+  mat4.translate(mvMatrix, mvMatrix, [3.0, 0.0, 0.0]);
   gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
   setMatrixUniforms();
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer.numItems);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer.numItems);*/
 }
 function webGLStart() {
   //var canvas = document.getElementById("lesson01-canvas");
   let canvas = new Window();
   canvas.onevent = function(event) {
-    puts("event: " + JSON.stringify(event));
+    //puts("event: " + JSON.stringify(event));
   };
   initGL(canvas);
   initShaders();
   initBuffers();
-  gl.clearColor(0.0, 0.0, 0.0, 1.0);
+  gl.clearColor(0.0, 0.1, 0.0, 1.0);
   gl.enable(gl.DEPTH_TEST);
   drawScene();
 }

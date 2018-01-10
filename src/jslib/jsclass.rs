@@ -59,7 +59,7 @@ impl GetJSClassInfo for () {
 pub trait JSClassInitializer {
     type Private;
 
-    unsafe fn init_class(rcx: &RJSContext, obj: HandleObject) -> *mut JSObject
+    unsafe fn init_class(rcx: &RJSContext, obj: HandleObject) -> context::ClassInfo
     where
         Self: Sized + 'static,
     {
@@ -91,12 +91,14 @@ pub trait JSClassInitializer {
 
         let constr = JS_GetConstructor(rcx.cx, proto.handle());
 
-        rcx.set_classinfo_for::<Self>(context::ClassInfo {
+        let classinfo = context::ClassInfo {
             constr: constr,
             prototype: proto.get(),
-        });
+        };
 
-        proto.get()
+        rcx.set_classinfo_for::<Self>(classinfo);
+
+        classinfo
     }
     fn class() -> *const JSClass;
 
@@ -198,7 +200,7 @@ macro_rules! __jsclass_parsed {
      [$($ops:tt)*] [$($props:tt)*]) => {
 
 $( __jsclass_toplevel!{_constr $constr} )*
-$( __jsclass_toplevel!{_fn $fns} )*
+//$( __jsclass_toplevel!{_fn $fns} )*
 $( __jsclass_toplevel!{_op $ops} )*
 $( __jsclass_toplevel!{_prop $props} )*
 
@@ -410,6 +412,10 @@ macro_rules! __jsclass_constrspec {
 #[macro_export]
 macro_rules! __jsclass_functionspec {
     ($vec:ident [fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}]) => {
+        {
+
+        __jsclass_toplevel!{_fn [fn $name $args -> JSRet<$ret> { $($body)*}]}
+
         $vec.push(
             JSFunctionSpec {
                 //name: b"log\0" as *const u8 as *const c_char,
@@ -424,6 +430,7 @@ macro_rules! __jsclass_functionspec {
                 },
             }
         );
+        }
     };
 }
 

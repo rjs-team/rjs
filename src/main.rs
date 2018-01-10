@@ -58,6 +58,25 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::marker::PhantomData;
 use std::fmt::Debug;
 
+macro_rules! setprop {
+    (in($cx:expr, $tval:expr) ($obj:expr) . $prop:ident = $val:expr) => {
+        unsafe {
+            $val.to_jsval($cx, $tval.handle_mut());
+            JS_SetProperty($cx, $obj, c_str!(stringify!($prop)),
+                $tval.handle());
+        }
+    }
+}
+
+macro_rules! gl_set_props {
+    ([$cx:expr, $obj:expr, $temp:expr] $($prop:ident)*) => {
+
+        $(
+            setprop!(in($cx, $temp) ($obj).$prop = gl::$prop);
+        )*
+    };
+}
+
 fn main() {
     let filename = env::args()
         .nth(1)
@@ -90,6 +109,8 @@ fn main() {
 
         let _ = unsafe { JS_InitStandardClasses(cx, global) };
 
+        let wininfo;
+
         unsafe {
             let _ = puts.define_on(cx, global, 0);
             let _ = setTimeout.define_on(cx, global, 0);
@@ -97,12 +118,27 @@ fn main() {
             let _ = readDir.define_on(cx, global, 0);
 
             Test::init_class(rcx, global);
-            Window::init_class(rcx, global);
+            wininfo = Window::init_class(rcx, global);
             WebGLShader::init_class(rcx, global);
             WebGLProgram::init_class(rcx, global);
             WebGLBuffer::init_class(rcx, global);
             WebGLUniformLocation::init_class(rcx, global);
         }
+
+        rooted!(in(rcx.cx) let winproto = wininfo.prototype);
+        let winproto = winproto.handle();
+        rooted!(in(rcx.cx) let mut temp = NullValue());
+        // TODO: Add all constants, organize them in a nice way
+        gl_set_props!([rcx.cx, winproto, temp]
+            FRAGMENT_SHADER VERTEX_SHADER
+            COMPILE_STATUS LINK_STATUS
+            ARRAY_BUFFER
+            STATIC_DRAW
+            COLOR_BUFFER_BIT DEPTH_BUFFER_BIT
+            POINTS TRIANGLES TRIANGLE_STRIP
+            FLOAT
+            DEPTH_TEST
+        );
 
         rooted!(in(cx) let mut rval = UndefinedValue());
         let res = rt.evaluate_script(global, &contents, &filename, 1, rval.handle_mut());
@@ -343,90 +379,81 @@ impl Window {
     }
 }
 
-macro_rules! setprop {
-    (in($cx:expr) ($obj:expr) . $prop:ident = $val:expr) => {
-        rooted!(in($cx) let mut val = NullValue());
-        unsafe {
-            $val.to_jsval($cx, val.handle_mut());
-            JS_SetProperty($cx, $obj, c_str!(stringify!($prop)),
-                val.handle());
-        }
-    }
-}
-
 fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Event) {
     use glutin::Event::*;
+    rooted!(in(cx) let mut val = NullValue());
 
     let set_mouse_scroll_delta = |delta: glutin::MouseScrollDelta| {
         use glutin::MouseScrollDelta::*;
+        rooted!(in(cx) let mut val = NullValue());
         match delta {
             LineDelta(x, y) => {
-                setprop!(in(cx) (obj).deltakind = "line");
-                setprop!(in(cx) (obj).x = x);
-                setprop!(in(cx) (obj).y = y);
+                setprop!(in(cx, val) (obj).deltakind = "line");
+                setprop!(in(cx, val) (obj).x = x);
+                setprop!(in(cx, val) (obj).y = y);
             }
             PixelDelta(x, y) => {
-                setprop!(in(cx) (obj).deltakind = "pixel");
-                setprop!(in(cx) (obj).x = x);
-                setprop!(in(cx) (obj).y = y);
+                setprop!(in(cx, val) (obj).deltakind = "pixel");
+                setprop!(in(cx, val) (obj).x = x);
+                setprop!(in(cx, val) (obj).y = y);
             }
         }
     };
 
     match event {
         DeviceEvent { .. } => {
-            setprop!(in(cx) (obj).kind = "device");
+            setprop!(in(cx, val) (obj).kind = "device");
         }
         WindowEvent { event, .. } => {
             use glutin::WindowEvent::*;
-            setprop!(in(cx) (obj).kind = "window");
+            setprop!(in(cx, val) (obj).kind = "window");
             match event {
                 Resized(w, h) => {
-                    setprop!(in(cx) (obj).type = "resized");
-                    setprop!(in(cx) (obj).width = w);
-                    setprop!(in(cx) (obj).height = h);
+                    setprop!(in(cx, val) (obj).type = "resized");
+                    setprop!(in(cx, val) (obj).width = w);
+                    setprop!(in(cx, val) (obj).height = h);
                 }
                 Moved(x, y) => {
-                    setprop!(in(cx) (obj).type = "moved");
-                    setprop!(in(cx) (obj).x = x);
-                    setprop!(in(cx) (obj).y = y);
+                    setprop!(in(cx, val) (obj).type = "moved");
+                    setprop!(in(cx, val) (obj).x = x);
+                    setprop!(in(cx, val) (obj).y = y);
                 }
                 Closed => {
-                    setprop!(in(cx) (obj).type = "closed");
+                    setprop!(in(cx, val) (obj).type = "closed");
                 }
                 ReceivedCharacter(c) => {
-                    setprop!(in(cx) (obj).type = "char");
-                    setprop!(in(cx) (obj).char = c.encode_utf8(&mut [0; 4]));
+                    setprop!(in(cx, val) (obj).type = "char");
+                    setprop!(in(cx, val) (obj).char = c.encode_utf8(&mut [0; 4]));
                 }
                 Focused(focused) => {
-                    setprop!(in(cx) (obj).type = "focused");
-                    setprop!(in(cx) (obj).focused = focused);
+                    setprop!(in(cx, val) (obj).type = "focused");
+                    setprop!(in(cx, val) (obj).focused = focused);
                 }
                 KeyboardInput { input, .. } => {
-                    setprop!(in(cx) (obj).type = "key");
-                    setprop!(in(cx) (obj).scancode = input.scancode);
+                    setprop!(in(cx, val) (obj).type = "key");
+                    setprop!(in(cx, val) (obj).scancode = input.scancode);
                 }
                 CursorMoved { position, .. } => {
-                    setprop!(in(cx) (obj).type = "cursormoved");
-                    setprop!(in(cx) (obj).x = position.0);
-                    setprop!(in(cx) (obj).y = position.1);
+                    setprop!(in(cx, val) (obj).type = "cursormoved");
+                    setprop!(in(cx, val) (obj).x = position.0);
+                    setprop!(in(cx, val) (obj).y = position.1);
                 }
                 CursorEntered { .. } => {
-                    setprop!(in(cx) (obj).type = "cursorentered");
+                    setprop!(in(cx, val) (obj).type = "cursorentered");
                 }
                 CursorLeft { .. } => {
-                    setprop!(in(cx) (obj).type = "cursorleft");
+                    setprop!(in(cx, val) (obj).type = "cursorleft");
                 }
                 MouseWheel { delta, .. } => {
-                    setprop!(in(cx) (obj).type = "wheel");
+                    setprop!(in(cx, val) (obj).type = "wheel");
                     set_mouse_scroll_delta(delta);
                 }
                 MouseInput { state, button, .. } => {
                     use glutin::ElementState::*;
                     use glutin::MouseButton::*;
-                    setprop!(in(cx) (obj).type = "mouse");
-                    setprop!(in(cx) (obj).pressed = state == Pressed);
-                    setprop!(in(cx) (obj).button = match button {
+                    setprop!(in(cx, val) (obj).type = "mouse");
+                    setprop!(in(cx, val) (obj).pressed = state == Pressed);
+                    setprop!(in(cx, val) (obj).button = match button {
                         Left => 0,
                         Right => 1,
                         Middle => 2,
@@ -434,31 +461,31 @@ fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Even
                     });
                 }
                 Refresh => {
-                    setprop!(in(cx) (obj).type = "refresh");
+                    setprop!(in(cx, val) (obj).type = "refresh");
                 }
                 Touch(touch) => {
                     use glutin::TouchPhase::*;
-                    setprop!(in(cx) (obj).type = "touch");
-                    setprop!(in(cx) (obj).phase = match touch.phase {
+                    setprop!(in(cx, val) (obj).type = "touch");
+                    setprop!(in(cx, val) (obj).phase = match touch.phase {
                         Started => "started",
                         Moved => "moved",
                         Ended => "ended",
                         Cancelled => "cancelled",
                     });
-                    setprop!(in(cx) (obj).pressed = touch.phase == Started ||
+                    setprop!(in(cx, val) (obj).pressed = touch.phase == Started ||
                              touch.phase == Moved);
-                    setprop!(in(cx) (obj).x = touch.location.0);
-                    setprop!(in(cx) (obj).y = touch.location.1);
-                    setprop!(in(cx) (obj).id = touch.id);
+                    setprop!(in(cx, val) (obj).x = touch.location.0);
+                    setprop!(in(cx, val) (obj).y = touch.location.1);
+                    setprop!(in(cx, val) (obj).id = touch.id);
                 }
                 _ => (),
             }
         }
         Suspended { .. } => {
-            setprop!(in(cx) (obj).kind = "suspended");
+            setprop!(in(cx, val) (obj).kind = "suspended");
         }
         Awakened => {
-            setprop!(in(cx) (obj).kind = "awakened");
+            setprop!(in(cx, val) (obj).kind = "awakened");
         }
     }
 }
@@ -534,6 +561,11 @@ js_class!{ WebGLShader extends ()
     fn WebGLShader_constr() -> JSRet<*mut JSObject> {
         Ok(ptr::null_mut())
     }
+
+    fn toString(this: @this Object<WebGLShader>) -> JSRet<String> {
+        Ok(format!("{{WebGLShader {}}}", this.private().id.load(Ordering::Relaxed)))
+    }
+
     @op(finalize)
     fn WebGLShader_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
         let private = JS_GetPrivate(this);
@@ -558,6 +590,11 @@ js_class!{ WebGLProgram extends ()
     fn WebGLProgram_constr() -> JSRet<*mut JSObject> {
         Ok(ptr::null_mut())
     }
+
+    fn toString(this: @this Object<WebGLProgram>) -> JSRet<String> {
+        Ok(format!("{{WebGLProgram {}}}", this.private().id.load(Ordering::Relaxed)))
+    }
+
     @op(finalize)
     fn WebGLProgram_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
         let private = JS_GetPrivate(this);
@@ -582,6 +619,11 @@ js_class!{ WebGLBuffer extends ()
     fn WebGLBuffer_constr() -> JSRet<*mut JSObject> {
         Ok(ptr::null_mut())
     }
+
+    fn toString(this: @this Object<WebGLBuffer>) -> JSRet<String> {
+        Ok(format!("{{WebGLBuffer {}}}", this.private().id.load(Ordering::Relaxed)))
+    }
+
     @op(finalize)
     fn WebGLBuffer_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
         let private = JS_GetPrivate(this);
@@ -606,6 +648,11 @@ js_class!{ WebGLUniformLocation extends ()
     fn WebGLUniformLocation_constr() -> JSRet<*mut JSObject> {
         Ok(ptr::null_mut())
     }
+
+    fn toString(this: @this Object<WebGLUniformLocation>) -> JSRet<String> {
+        Ok(format!("{{WebGLUniformLocation {}}}", this.private().loc.load(Ordering::Relaxed)))
+    }
+
     @op(finalize)
     fn WebGLUniformLocation_finalize(_free: *mut jsapi::JSFreeOp, this: *mut JSObject) -> () {
         let private = JS_GetPrivate(this);
@@ -717,6 +764,14 @@ js_class!{ Window extends ()
         }
 
         Ok(())
+    }
+
+    fn getError(this: @this Object<Window>)
+        -> JSRet<GLenum> {
+        Ok(this.private().sync_do_on_thread(
+            move |_: &glutin::GlWindow| {
+                unsafe { gl::GetError() }
+            }))
     }
 
     fn clearColor(this: @this Object<Window>, r: f32, g: f32, b: f32, a: f32)
@@ -1209,7 +1264,7 @@ fn window_thread(
                 let mut stuff = stuff.borrow_mut();
                 match msg {
                     WindowMsg::Do(func) => {
-                        println!("message Do");
+                        //println!("message Do");
                         func.call_box((&stuff.gl_window,));
                     }
                     WindowMsg::Ping => {
@@ -1235,9 +1290,9 @@ fn window_thread(
     let handle_window_events = loop_fn((), move |()| {
         let mut stuff = stuff.borrow_mut();
 
-        unsafe {
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-        }
+        //unsafe {
+        //    gl::Clear(gl::COLOR_BUFFER_BIT);
+        //}
         let now = Instant::now();
         stuff.gl_window.swap_buffers().unwrap();
         let swap_time = now.elapsed();
@@ -1245,6 +1300,7 @@ fn window_thread(
         if swap_ms > 1.0 {
             println!("swap took: {}ms", swap_ms);
         }
+        thread::sleep(Duration::from_secs(1));
 
         events_loop.poll_events(|event| {
             match event {
