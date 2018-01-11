@@ -845,6 +845,28 @@ js_class!{ Window extends ()
         Ok(())
     }
 
+    fn getShaderInfoLog(this: @this Object<Window>, shader: Object<WebGLShader>)
+        -> JSRet<String> {
+        let idref = Arc::clone(&shader.private().id);
+
+        Ok(this.private().sync_do_on_thread(
+            move |_: &glutin::GlWindow| {
+                let id = idref.load(Ordering::Relaxed);
+                let mut len = 0;
+                unsafe { gl::GetShaderiv(id as u32, gl::INFO_LOG_LENGTH, &mut len) };
+
+                let mut v = vec![0; len as usize];
+                let mut outlen = len;
+
+                unsafe { gl::GetShaderInfoLog(id as u32,
+                                          len as i32,
+                                          &mut outlen,
+                                          v.as_mut_ptr() as *mut _) };
+
+                String::from_utf8(v)
+            }).unwrap())
+    }
+
     fn getShaderParameter(this: @this Object<Window>, shader: Object<WebGLShader>,
                           param: GLenum {ConversionBehavior::Default})
                          -> JSRet<JSVal> {
@@ -1228,13 +1250,20 @@ fn window_thread(
     let window = glutin::WindowBuilder::new()
         .with_title("RJS Window")
         .with_dimensions(1024, 768);
-    let context = glutin::ContextBuilder::new().with_vsync(true);
+    let context = glutin::ContextBuilder::new()
+        .with_gl_profile(glutin::GlProfile::Core)
+        .with_vsync(true);
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
 
     unsafe {
         gl_window.make_current().unwrap();
         gl::load_with(|symbol| gl_window.get_proc_address(symbol) as *const _);
         gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+
+        // OpenGL and GLES 2.0 treat VAO 0 specially
+        let mut vao = 0;
+        gl::CreateVertexArrays(1, &mut vao);
+        gl::BindVertexArray(vao);
     }
 
     let (stop_send, stop_recv) = futures::sync::oneshot::channel();

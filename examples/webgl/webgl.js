@@ -1,7 +1,9 @@
 // Shamelessly stolen from https://github.com/gpjt/webgl-lessons/blob/master/lesson01/index.html
 
 let fragment = `
-    precision mediump float;
+		// sometimes it failes on this line with:
+    // "syntax error, unexpected NEW_IDENTIFIER"
+    //precision mediump float;
     void main(void) {
         gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
     }
@@ -44,7 +46,14 @@ function initGL(canvas) {
           let val = target[name];
           if (val instanceof Function)
             return function() {
-              let ret = target[name].apply(target, arguments);
+							let ret;
+							try {
+								ret = val.apply(target, arguments);
+							} catch (e) {
+								puts("gl."+name+"(" + Array.prototype.slice.call(arguments).map(x => "" + x).join(', ') + ")");
+								puts("" + e);
+								throw e;
+							}
               let err = target.getError();
               puts("gl."+name+"(" + Array.prototype.slice.call(arguments).map(x => "" + x).join(', ') + "): " + ret);
               if (err != 0) {
@@ -149,13 +158,13 @@ function drawScene() {
   mat4.translate(mvMatrix, mvMatrix, [-1.5, 0.0, -7.0]);
   gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, triangleVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
-  //setMatrixUniforms();
-  /*gl.drawArrays(gl.TRIANGLES, 0, triangleVertexPositionBuffer.numItems);
+  setMatrixUniforms();
+  gl.drawArrays(gl.TRIANGLES, 0, triangleVertexPositionBuffer.numItems);
   mat4.translate(mvMatrix, mvMatrix, [3.0, 0.0, 0.0]);
   gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
   gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
   setMatrixUniforms();
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer.numItems);*/
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer.numItems);
 }
 function webGLStart() {
   //var canvas = document.getElementById("lesson01-canvas");
