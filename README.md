@@ -17,4 +17,19 @@ peek into the Issues and look for a "help wanted" issue to get started!
   
 - Why not V8?  
   It's time for SpiderMonkey to find more uses outside of Firefox.
+  
+## Build
+- Ensure you are using rust nightly:  https://doc.rust-lang.org/1.13.0/book/nightly-rust.html
+- If you attempt cargo build and receive:  error[E0412]: cannot find type `NonNull` in module `ptr` then you are
+  not using nightly.
+- confirm with rustc --version
+- On debian rust nightly installs to /usr/local/bin/rustc & the standard rustup installs to ~/.cargo/bin/rustc
+- git clone --recursive https://github.com/rjs-team/rjs.git
+- cd rjs
+- cargo build
+- Test with:
+    - ./target/debug/rjs ./examples/webgl/webgl.js
+    - If all went well you should see:
+    ![Screenshot](./images/RJS_Window.png)
+
 
