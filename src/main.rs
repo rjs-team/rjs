@@ -1,9 +1,7 @@
 #![feature(fnbox)]
 #![feature(const_fn)]
-#![feature(alloc)]
 #![recursion_limit = "100"]
 
-extern crate alloc;
 extern crate futures;
 extern crate gl;
 extern crate glutin;
@@ -513,7 +511,7 @@ impl<T: JSClassInitializer> FromJSValConvertible for Object<T> {
         value: HandleValue,
         _: (),
     ) -> Result<ConversionResult<Object<T>>, ()> {
-        use alloc::borrow::Cow;
+        use std::borrow::Cow;
 
         if !value.is_object() {
             return Ok(ConversionResult::Failure(Cow::Borrowed(
