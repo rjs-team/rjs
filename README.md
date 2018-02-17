@@ -36,16 +36,9 @@ that you have the following installed:
 pacman -S base-devel python2 cmake
 ```
 
-#### Windows (MSYS2)
+#### Windows
 
-1. Download and install [Python 2.7.x](https://www.python.org/downloads/).
-    * Make sure that your `PATH` has your `python` executable pointing to this 2.7.x installation!
-2. Install CMake:
-
-```bash
-pacman -S base-devel
-pacman -S cmake
-```
+TODO
 
 ### Building
 
