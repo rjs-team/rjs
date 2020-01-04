@@ -1335,7 +1335,7 @@ fn window_thread(
         events_loop.poll_events(|event| {
             match event {
                 glutin::Event::WindowEvent { ref event, .. } => match *event {
-                    glutin::WindowEvent::Closed => {
+                    glutin::WindowEvent::CloseRequested => {
                         stuff.stop();
                         stuff.gl_window.hide();
                         let _ = send_events.unbounded_send(WindowEvent::Closed);
