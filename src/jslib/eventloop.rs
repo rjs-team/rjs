@@ -18,14 +18,13 @@ use std::cell::RefCell;
 use std::fmt::Debug;
 use downcast::Any;
 use mozjs::rust::{GCMethods, Runtime, Trace};
-use mozjs::jsapi::{GCForReason, Heap, JSGCInvocationKind, JSTracer, JS_AddExtraGCRootsTracer,
-                   JS_RemoveExtraGCRootsTracer, Reason};
+use mozjs::jsapi::{GCReason, Heap, JSGCInvocationKind, JSTracer, JS_AddExtraGCRootsTracer,
+                   JS_RemoveExtraGCRootsTracer, NonIncrementalGC};
 
 use std::os::raw::c_void;
-use std::boxed::FnBox;
 
 //type EventLoopFn<T> = for<'t> Fn(&'t T, Handle<T>);
-type Message<T> = (Remote<T>, Box<FnBox(Handle<T>) -> ()>);
+type Message<T> = (Remote<T>, Box<FnOnce(Handle<T>) -> ()>);
 
 type RefSlab = RefCell<Slab<RefSlabEl>>;
 type RefSlabEl = RefCell<Option<Box<Traceable>>>;
@@ -34,7 +33,7 @@ trait Traceable: Any {
     fn get_trace(&self) -> &Trace;
 }
 
-unsafe impl Trace for Traceable {
+unsafe impl Trace for dyn Traceable {
     unsafe fn trace(&self, trc: *mut JSTracer) {
         self.get_trace().trace(trc)
     }
@@ -91,7 +90,7 @@ where
     };
 
     let extradata: *mut rc::Weak<RefSlab> = Box::into_raw(Box::new(rc::Weak::clone(&handle.slab)));
-    unsafe { JS_AddExtraGCRootsTracer(rt.rt(), Some(ref_slab_tracer), extradata as *mut _) };
+    unsafe { JS_AddExtraGCRootsTracer(rt.cx(), Some(ref_slab_tracer), extradata as *mut _) };
 
     let _: Result<(), ()> = core.run(future::lazy(|| {
         first(handle);
@@ -104,15 +103,15 @@ where
                 data: Rc::clone(&data),
                 slab: Rc::downgrade(&slab),
             };
-            unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
-            f.call_box((handle,));
-            unsafe { GCForReason(rt.rt(), JSGCInvocationKind::GC_SHRINK, Reason::NO_REASON) };
+            unsafe { NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON) };
+            f(handle);
+            unsafe { NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON) };
             Ok(())
         })
     }));
 
     unsafe {
-        JS_RemoveExtraGCRootsTracer(rt.rt(), Some(ref_slab_tracer), extradata as *mut _);
+        JS_RemoveExtraGCRootsTracer(rt.cx(), Some(ref_slab_tracer), extradata as *mut _);
         Box::from_raw(extradata);
     }
 }
@@ -187,8 +186,8 @@ impl<T> Handle<T> {
             marker: PhantomData,
         }
     }
-
-    pub fn retrieve<V: Debug + 'static>(&self, rref: &RemoteRef<V>) -> Option<V> {
+    // dirty copy instead of debug
+    pub fn retrieve<V: Copy + 'static>(&self, rref: &RemoteRef<V>) -> Option<V> {
         let slab = self.slab.upgrade().unwrap();
         let slab = slab.borrow();
         let r = unsafe { slab.get_unchecked(rref.key) };
@@ -259,8 +258,8 @@ impl<T> Remote<T> {
         F: FnOnce(Handle<T>) + Send + 'static,
     {
         let me: Remote<T> = (*self).clone();
-        let myfunc: Box<FnBox(Handle<T>) -> () + 'static> = Box::new(f);
-        //let myfunc: Box<FnBox<T>> = Box::new( |a, b| f(a, b) );
+        let myfunc: Box<FnOnce(Handle<T>) -> () + 'static> = Box::new(f);
+        //let myfunc: Box<FnOnce<T>> = Box::new( |a, b| f(a, b) );
         let fb = (me, myfunc);
         (*self.0).unbounded_send(fb).unwrap()
     }

@@ -48,12 +48,12 @@ macro_rules! js_fn_raw {
             let result = rustImpl(rcx, &handle, args);
             match result {
                 Ok(v) => {
-                    v.to_jsval(cx, args.rval());
+                    v.to_jsval(cx, mozjs::rust::MutableHandle::from_raw(args.rval()));
                     true
                 },
                 Err(Some(s)) => {
                     let cstr = CString::new(s).unwrap();
-                    JS_ReportError(cx, cstr.as_ptr() as *const libc::c_char);
+                    JS_ReportErrorUTF8(cx, cstr.as_ptr() as *const libc::c_char);
                     false
                 },
                 Err(None) => {
@@ -85,7 +85,7 @@ macro_rules! js_fn {
 
         impl RJSFn for $name {
 
-            fn func(&self) -> rjs::jslib::jsfn::RJSNativeRaw {
+            fn func(&self) -> jslib::jsfn::RJSNativeRaw {
                 $name::rawfunc
             }
 
@@ -112,7 +112,7 @@ macro_rules! js_callback {
     ($rcx:ident, move |$($param:ident : $type:ty),*| $body:tt) => (
         (move |tx: Arc<oneshot::Sender<()>>| {
             move |$($param : $type),*| {
-                let _ac = JSAutoCompartment::new($rcx.cx, $rcx.global.get());
+                let _ac = JSAutoRealm::new($rcx.cx, $rcx.global.get());
 
                 let ret = (|$($param : $type),*| $body) ($($param),*);
 
@@ -134,7 +134,7 @@ macro_rules! js_unpack_args {
         #[allow(unused)]
         use mozjs::conversions::FromJSValConvertible;
 
-        if $callargs._base.argc_ != _js_unpack_args_count!($($args)*,) {
+        if $callargs.argc_ != _js_unpack_args_count!($($args)*,) {
             return Err(Some(format!("{}() requires exactly {} argument", $fn,
                 _js_unpack_args_count!($($args)*,)).into()));
         }
@@ -185,7 +185,7 @@ macro_rules! _js_unpack_args_unwrap_args {
     (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
      $name:ident : @this $type:ty, $($args:tt)*) => {
         let $name = unsafe {
-            <$type as FromJSValConvertible>::from_jsval($rcx.cx, $callargs.thisv(), ())
+            <$type as FromJSValConvertible>::from_jsval($rcx.cx, mozjs::rust::Handle::from_raw($callargs.thisv()), ())
                 .to_result()? };
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n) $($args)*);
     };
@@ -219,7 +219,7 @@ macro_rules! _js_unpack_args_unwrap_args {
     (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
      $name:ident : $type:ty {$opt:expr}, $($args:tt)*) => {
         let $name = unsafe {
-            <$type as FromJSValConvertible>::from_jsval($rcx.cx, $callargs.get($n), $opt)
+            <$type as FromJSValConvertible>::from_jsval($rcx.cx, mozjs::rust::Handle::from_raw($callargs.get($n)), $opt)
                 .to_result()? };
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n+1) $($args)*);
     };
@@ -227,7 +227,7 @@ macro_rules! _js_unpack_args_unwrap_args {
     (($rcx:expr, $remote:expr, $callargs:expr, $n:expr)
      $name:ident : $type:ty, $($args:tt)*) => {
         let $name = unsafe {
-            <$type as FromJSValConvertible>::from_jsval($rcx.cx, $callargs.get($n), ())
+            <$type as FromJSValConvertible>::from_jsval($rcx.cx, mozjs::rust::Handle::from_raw($callargs.get($n)), ())
                 .to_result()? };
         _js_unpack_args_unwrap_args!(($rcx, $remote, $callargs, $n+1) $($args)*);
     };

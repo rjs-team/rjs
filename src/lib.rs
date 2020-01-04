@@ -1,7 +1,6 @@
-#![feature(const_fn)]
-#![feature(libc)]
-#![feature(fnbox)]
-#![feature(refcell_replace_swap)]
+//#![feature(libc)]
+//#![feature(fnbox)]
+//#![feature(refcell_replace_swap)]
 // #![cfg(feature = "debugmozjs")]
 
 #[macro_use]

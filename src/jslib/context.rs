@@ -1,7 +1,7 @@
-use jslib::eventloop;
+use crate::jslib::eventloop;
 use mozjs::jsapi::{HandleObject, JSContext, JSObject, JS_GetCompartmentPrivate,
-                   JS_SetCompartmentPrivate};
-use mozjs::rust::get_context_compartment;
+                   JS_SetCompartmentPrivate, GetRealmPrivate, SetRealmPrivate};
+use mozjs::jsapi::GetCurrentRealmOrNull;
 
 use std::collections::HashMap;
 use std::any::TypeId;
@@ -52,27 +52,27 @@ pub type RJSRemote = eventloop::Remote<RJSContext>;
 pub type RuntimePrivate = eventloop::WeakHandle<RJSContext>;
 
 pub fn store_private(cx: *mut JSContext, handle: &RJSHandle) {
-    let compartment = unsafe { get_context_compartment(cx) };
+    let compartment = unsafe { GetCurrentRealmOrNull(cx) };
     let private = Box::new(handle.downgrade());
     unsafe {
-        JS_SetCompartmentPrivate(compartment, Box::into_raw(private) as *mut c_void);
+        SetRealmPrivate(compartment, Box::into_raw(private) as *mut c_void);
     }
 }
 
 pub fn clear_private(cx: *mut JSContext) {
-    let compartment = unsafe { get_context_compartment(cx) };
-    let private = unsafe { JS_GetCompartmentPrivate(compartment) as *mut RuntimePrivate };
+    let compartment = unsafe { GetCurrentRealmOrNull(cx) };
+    let private = unsafe { GetRealmPrivate(compartment) as *mut RuntimePrivate };
     if !private.is_null() {
         unsafe {
             let _ = Box::from_raw(private);
-            JS_SetCompartmentPrivate(compartment, ptr::null_mut());
+            SetRealmPrivate(compartment, ptr::null_mut());
         }
     }
 }
 
 pub fn get_handle(cx: *mut JSContext) -> Option<RJSHandle> {
-    let compartment = unsafe { get_context_compartment(cx) };
-    let private = unsafe { JS_GetCompartmentPrivate(compartment) as *const RuntimePrivate };
+    let compartment = unsafe { GetCurrentRealmOrNull(cx) };
+    let private = unsafe { GetRealmPrivate(compartment) as *const RuntimePrivate };
     if private.is_null() {
         None
     } else {

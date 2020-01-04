@@ -1,43 +1,31 @@
-use mozjs::jsapi::{CallArgs, Handle, HandleObject, JSClass, JSContext, JSFunctionSpec,
-                   JSNativeWrapper, JSObject, JSPropertySpec, JS_GetConstructor,
-                   JS_GetInstancePrivate, JS_InitClass, JS_SetPrivate,
-                   JSCLASS_RESERVED_SLOTS_SHIFT};
-use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
-use jslib::jsfn::RJSFn;
-use jslib::context;
-use jslib::context::{ClassInfo, RJSContext};
+use crate::jslib::context;
+use crate::jslib::context::{ClassInfo, RJSContext};
+use crate::jslib::jsfn::RJSFn;
 use libc::c_uint;
+use mozjs::jsapi::{
+    CallArgs, Handle, HandleObject, JSClass, JSContext, JSFunctionSpec, JSNativeWrapper, JSObject,
+    JSPropertySpec, JS_GetConstructor, JS_GetInstancePrivate, JS_InitClass, JS_SetPrivate,
+    JSCLASS_RESERVED_SLOTS_SHIFT,
+};
+use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
 use std::ptr;
 
 pub const JSCLASS_HAS_PRIVATE: c_uint = 1;
+use mozjs::jsapi::JSPropertySpec__bindgen_ty_1;
 pub const fn jsclass_has_reserved_slots(n: c_uint) -> c_uint {
     (n & JSCLASS_RESERVED_SLOTS_MASK) << JSCLASS_RESERVED_SLOTS_SHIFT
 }
 
 pub const fn null_wrapper() -> JSNativeWrapper {
-    JSNativeWrapper {
-        op: None,
-        info: ptr::null(),
-    }
+    JSNativeWrapper::ZERO
 }
 
 pub const fn null_property() -> JSPropertySpec {
-    JSPropertySpec {
-        name: ptr::null(),
-        flags: 0,
-        getter: null_wrapper(),
-        setter: null_wrapper(),
-    }
+    JSPropertySpec::ZERO
 }
 
 pub const fn null_function() -> JSFunctionSpec {
-    JSFunctionSpec {
-        name: ptr::null(),
-        flags: 0,
-        call: null_wrapper(),
-        nargs: 0,
-        selfHostedName: ptr::null(),
-    }
+    JSFunctionSpec::ZERO
 }
 
 pub trait GetJSClassInfo
@@ -79,7 +67,7 @@ pub trait JSClassInitializer {
         rooted!(in(rcx.cx) let proto = JS_InitClass(
             rcx.cx,
             obj,
-            parent_proto.handle(),
+            parent_proto.handle().into(),
             cls,
             constrfn,
             constrnargs,
@@ -89,7 +77,7 @@ pub trait JSClassInitializer {
             static_fns,
         ));
 
-        let constr = JS_GetConstructor(rcx.cx, proto.handle());
+        let constr = JS_GetConstructor(rcx.cx, proto.handle().into());
 
         let classinfo = context::ClassInfo {
             constr: constr,
@@ -144,7 +132,8 @@ pub trait JSClassInitializer {
     where
         Self: Sized + 'static,
     {
-        let info = rcx.get_classinfo_for::<Self>()
+        let info = rcx
+            .get_classinfo_for::<Self>()
             .expect(&format!("{} must be defined in this compartment!", "?"));
 
         let jsobj = unsafe {
@@ -167,7 +156,7 @@ pub trait JSClassInitializer {
 macro_rules! compute_once {
     ($type:ty = $static:expr ; $body:tt) => {
         unsafe {
-            static mut VAL : $type = $static;
+            static mut VAL: $type = $static;
             static ONCE: Once = ONCE_INIT;
 
             ONCE.call_once(|| {
@@ -176,14 +165,14 @@ macro_rules! compute_once {
 
             VAL
         }
-    }
+    };
 }
 
 #[macro_export]
 macro_rules! c_str {
     ($str:expr) => {
         concat!($str, "\0").as_ptr() as *const ::std::os::raw::c_char
-    }
+    };
 }
 
 #[macro_export]
@@ -285,7 +274,7 @@ impl JSClassInitializer for $name {
 
 #[macro_export]
 macro_rules! nothing {
-    ($($any:tt)*) => {}
+    ($($any:tt)*) => {};
 }
 
 #[macro_export]
@@ -339,17 +328,18 @@ macro_rules! __jsclass_ops {
      $t:tt] ) => {
         &JSClassOps {
             addProperty: $ap,
-            call: $ca,
-            construct: $co,
             delProperty: $dp,
             enumerate: $e,
-            finalize: $f,
-            getProperty: $gp,
-            hasInstance: $hi,
-            mayResolve: $mr,
+            newEnumerate: None,
             resolve: $r,
-            setProperty: $sp,
+            mayResolve: $mr,
+            finalize: $f,
+            call: $ca,
+            hasInstance: $hi,
+            construct: $co,
             trace: $t,
+            //getProperty: $gp,
+            //setProperty: $sp,
         }
     };
     (
@@ -405,7 +395,7 @@ macro_rules! __jsclass_ops {
 #[macro_export]
 macro_rules! __jsclass_constrspec {
     ([fn $name:ident $args:tt -> JSRet<$ret:ty> {$($body:tt)*}]) => {
-        return Some(Box::new($name{}));
+        return Some(Box::new($name {}));
     };
 }
 
@@ -472,9 +462,21 @@ macro_rules! __jsclass_propertyspec {
                 //name: CString::new(stringify!($name)).unwrap().into_raw(),
                 name: concat!(stringify!($name), "\0").as_ptr()
                     as *const ::std::os::raw::c_char,
-                flags: (JSPROP_ENUMERATE | JSPROP_SHARED) as u8,
-                getter: $getter,
-                setter: $setter,
+                flags: (JSPROP_ENUMERATE) as u8,
+                __bindgen_anon_1: mozjs::jsapi::JSPropertySpec__bindgen_ty_1 {
+                    accessors: mozjs::jsapi::JSPropertySpec__bindgen_ty_1__bindgen_ty_1 {
+                        getter: mozjs::jsapi::JSPropertySpec__bindgen_ty_1__bindgen_ty_1__bindgen_ty_1 {
+                            //native: JSNativeWrapper { op: Some(h), info: ptr::null() },
+                            native: $getter,
+                        },
+                        setter: mozjs::jsapi::JSPropertySpec__bindgen_ty_1__bindgen_ty_1__bindgen_ty_2 {
+                            //native: JSNativeWrapper { op: None, info: ptr::null() },
+                            native: $setter,
+                        }
+                    }
+                }
+                //getter: $getter,
+                //setter: $setter,
             },
         );
     };
