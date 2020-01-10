@@ -186,7 +186,6 @@ impl<T> Handle<T> {
             marker: PhantomData,
         }
     }
-    // dirty copy instead of debug
     pub fn retrieve<V: Copy + 'static>(&self, rref: &RemoteRef<V>) -> Option<V> {
         let slab = self.slab.upgrade().unwrap();
         let slab = slab.borrow();

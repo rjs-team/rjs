@@ -1,8 +1,3 @@
-//#![feature(libc)]
-//#![feature(fnbox)]
-//#![feature(refcell_replace_swap)]
-// #![cfg(feature = "debugmozjs")]
-
 #[macro_use]
 extern crate downcast;
 extern crate futures;

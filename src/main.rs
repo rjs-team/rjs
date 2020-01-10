@@ -1,5 +1,3 @@
-//#![feature(FnOnce)]
-//#![feature(const_fn)]
 #![recursion_limit = "100"]
 
 extern crate futures;
