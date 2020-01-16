@@ -1,23 +1,24 @@
 [package]
 name = "rjs"
 version = "0.1.0"
+edition = "2018"
 authors = ["Matt Peterson <mattpeterson@google.com>"]
 
 [features]
 debugmozjs = ['mozjs/debugmozjs']
 
 [dependencies]
-mozjs = {git = "https://github.com/servo/rust-mozjs", features = ["promises"]}
-tokio-core = "0.1.6"
-tokio-timer = "0.1.1"
-futures = "0.1"
+mozjs = {git = "https://github.com/servo/rust-mozjs"}
+tokio-core = "0.1.17"
+tokio-timer = "0.2.12"
+futures = "0.1.29"
 # concat_bytes = "0.1.0"
-lazy_static = "1.0.0"
-slab = "0.4.0"
-downcast = "0.9.1"
-glutin = "*"
-gl = "*"
-libc = "0.2.34"
+lazy_static = "1.4.0"
+slab = "0.4.2"
+downcast = "0.10.0"
+glutin = "0.16.0"
+gl = "0.14.0"
+libc = "0.2.66"
 
 [package.metadata.android]
 label = "Using assets android-rs-glue example"

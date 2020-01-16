@@ -1,5 +1,3 @@
-#![feature(fnbox)]
-#![feature(const_fn)]
 #![recursion_limit = "100"]
 
 extern crate futures;
@@ -8,61 +6,74 @@ extern crate glutin;
 extern crate libc;
 #[macro_use]
 extern crate mozjs;
-#[macro_use]
-extern crate rjs;
 extern crate tokio_core;
 
-use futures::Stream;
 use futures::future::{loop_fn, Future, Loop};
 use futures::sync::mpsc;
+use futures::Stream;
 use glutin::GlContext;
-use jsapi::{CallArgs, CompartmentOptions, HandleValue, HandleValueArray, JSAutoCompartment,
-            JSContext, JSObject, JS_CallFunctionValue, JS_NewArrayObject1, JS_NewGlobalObject,
-            JS_NewObjectForConstructor, JS_ReportError, JS_SetElement, OnNewGlobalHookOption,
-            Value};
-use jsval::{JSVal, ObjectValue, UndefinedValue};
-use mozjs::conversions::{ConversionBehavior, ConversionResult, FromJSValConvertible,
-                         ToJSValConvertible};
-use mozjs::jsapi::{Handle, HandleObject, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper,
-                   JSPropertySpec, JS_GetPrivate, JS_GetProperty, JS_InitStandardClasses,
-                   JS_NewPlainObject, JS_SetPrivate, JS_SetProperty, JSPROP_ENUMERATE,
-                   JSPROP_SHARED};
+use mozjs::conversions::{
+    ConversionBehavior, ConversionResult, FromJSValConvertible, ToJSValConvertible,
+};
 use mozjs::jsapi;
-use mozjs::jsval::NullValue;
+use mozjs::jsapi::StackFormat;
+use mozjs::jsapi::{
+    CallArgs, HandleValue, HandleValueArray, JSAutoRealm, JSContext, JSObject,
+    JS_CallFunctionValue, JS_NewArrayObject1, JS_NewGlobalObject, JS_NewObjectForConstructor,
+    JS_ReportErrorUTF8, JS_SetElement, OnNewGlobalHookOption, Value,
+};
+use mozjs::jsapi::{
+    Handle, HandleObject, JSClass, JSClassOps, JSFunctionSpec, JSNativeWrapper, JSPropertySpec,
+    JS_EnumerateStandardClasses, JS_GetPrivate, JS_GetProperty, JS_NewPlainObject, JS_SetPrivate,
+    JS_SetProperty, JSPROP_ENUMERATE,
+};
 use mozjs::jsval;
-use mozjs::rust::{Runtime, SIMPLE_GLOBAL_CLASS};
-use rjs::jslib::context;
-use rjs::jslib::context::{RJSContext, RJSHandle};
-use rjs::jslib::eventloop;
-use rjs::jslib::jsclass::{null_function, null_property, null_wrapper, JSClassInitializer,
-                          JSCLASS_HAS_PRIVATE};
-use rjs::jslib::jsfn::{JSRet, RJSFn};
-use std::boxed::FnBox;
+use mozjs::jsval::NullValue;
+use mozjs::jsval::{JSVal, ObjectValue, UndefinedValue};
+use mozjs::rust::{JSEngine, RealmOptions, Runtime, SIMPLE_GLOBAL_CLASS};
+#[macro_use]
+extern crate downcast;
+extern crate lazy_static;
+#[macro_use]
+extern crate slab;
+
+#[cfg(test)]
+mod tests;
+
+#[macro_use]
+pub mod jslib;
+use core::ptr;
+use gl::types::*;
+use jslib::context;
+use jslib::context::{RJSContext, RJSHandle};
+use jslib::eventloop;
+use jslib::jsclass::{
+    null_function, null_property, null_wrapper, JSClassInitializer, JSCLASS_HAS_PRIVATE,
+};
+use jslib::jsfn::{JSRet, RJSFn};
+use std::boxed;
 use std::env;
 use std::ffi::CString;
-use std::fs::File;
+use std::fmt::Debug;
 use std::fs;
+use std::fs::File;
 use std::io::Read;
+use std::marker::PhantomData;
 use std::path::Path;
-use std::ptr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::sync::{Once, ONCE_INIT};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio_core::reactor::{Core, Timeout};
-use gl::types::*;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::marker::PhantomData;
-use std::fmt::Debug;
 
 macro_rules! setprop {
     (in($cx:expr, $tval:expr) ($obj:expr) . $prop:ident = $val:expr) => {
         unsafe {
             $val.to_jsval($cx, $tval.handle_mut());
-            JS_SetProperty($cx, $obj, c_str!(stringify!($prop)),
-                $tval.handle());
+            JS_SetProperty($cx, $obj, c_str!(stringify!($prop)), $tval.handle().into());
         }
-    }
+    };
 }
 
 macro_rules! gl_set_props {
@@ -83,50 +94,52 @@ fn main() {
     let mut contents = String::new();
     file.read_to_string(&mut contents)
         .expect("Cannot read file");
-
-    let rt = Runtime::new().unwrap();
+    let engine = JSEngine::init().unwrap();
+    let rt = Runtime::new(engine.handle());
     #[cfg(debugmozjs)]
-    unsafe { jsapi::JS_SetGCZeal(rt.rt(), 2, 1) };
+    unsafe {
+        jsapi::JS_SetGCZeal(rt.rt(), 2, 1)
+    };
 
     let cx = rt.cx();
 
     rooted!(in(cx) let global_root =
         unsafe { JS_NewGlobalObject(cx, &SIMPLE_GLOBAL_CLASS, ptr::null_mut(),
                            OnNewGlobalHookOption::FireOnNewGlobalHook,
-                           &CompartmentOptions::default()) }
+                           &*RealmOptions::default()) }
     );
     let global = global_root.handle();
-    let rcx = RJSContext::new(cx, global);
+    let rcx = RJSContext::new(cx, global.into());
 
     eventloop::run(&rt, rcx, |handle| {
         let rcx = handle.get();
-        let _ac = JSAutoCompartment::new(cx, global.get());
+        let _ac = JSAutoRealm::new(cx, global.get());
 
         context::store_private(cx, &handle);
 
-        let _ = unsafe { JS_InitStandardClasses(cx, global) };
+        let _ = unsafe { JS_EnumerateStandardClasses(cx, global.into()) };
 
         let wininfo;
 
         unsafe {
-            let _ = puts.define_on(cx, global, 0);
-            let _ = setTimeout.define_on(cx, global, 0);
-            let _ = getFileSync.define_on(cx, global, 0);
-            let _ = readDir.define_on(cx, global, 0);
+            let _ = puts.define_on(cx, global.into(), 0);
+            let _ = setTimeout.define_on(cx, global.into(), 0);
+            let _ = getFileSync.define_on(cx, global.into(), 0);
+            let _ = readDir.define_on(cx, global.into(), 0);
 
-            Test::init_class(rcx, global);
-            wininfo = Window::init_class(rcx, global);
-            WebGLShader::init_class(rcx, global);
-            WebGLProgram::init_class(rcx, global);
-            WebGLBuffer::init_class(rcx, global);
-            WebGLUniformLocation::init_class(rcx, global);
+            Test::init_class(rcx, global.into());
+            wininfo = Window::init_class(rcx, global.into());
+            WebGLShader::init_class(rcx, global.into());
+            WebGLProgram::init_class(rcx, global.into());
+            WebGLBuffer::init_class(rcx, global.into());
+            WebGLUniformLocation::init_class(rcx, global.into());
         }
 
         rooted!(in(rcx.cx) let winproto = wininfo.prototype);
         let winproto = winproto.handle();
         rooted!(in(rcx.cx) let mut temp = NullValue());
         // TODO: Add all constants, organize them in a nice way
-        gl_set_props!([rcx.cx, winproto, temp]
+        gl_set_props!([rcx.cx, winproto.into(), temp]
             FRAGMENT_SHADER VERTEX_SHADER
             COMPILE_STATUS LINK_STATUS
             ARRAY_BUFFER
@@ -138,7 +151,7 @@ fn main() {
         );
 
         rooted!(in(cx) let mut rval = UndefinedValue());
-        let res = rt.evaluate_script(global, &contents, &filename, 1, rval.handle_mut());
+        let res = rt.evaluate_script(global.into(), &contents, &filename, 1, rval.handle_mut());
         if !res.is_ok() {
             unsafe {
                 report_pending_exception(cx);
@@ -152,7 +165,7 @@ fn main() {
         println!("script result: {}", str);
     });
 
-    let _ac = JSAutoCompartment::new(cx, global.get());
+    let _ac = JSAutoRealm::new(cx, global.get());
     context::clear_private(cx);
 }
 
@@ -170,12 +183,12 @@ impl<T> ToResult<T> for Result<mozjs::conversions::ConversionResult<T>, ()> {
     }
 }
 
-js_fn!{fn puts(arg: String) -> JSRet<()> {
+js_fn! {fn puts(arg: String) -> JSRet<()> {
     println!("puts: {}", arg);
     Ok(())
 }}
 
-js_fn!{fn setTimeout(rcx: &RJSContext,
+js_fn! {fn setTimeout(rcx: &RJSContext,
                      handle: &RJSHandle,
                      callback: JSVal,
                      timeout: u64 {ConversionBehavior::Default}
@@ -191,7 +204,7 @@ js_fn!{fn setTimeout(rcx: &RJSContext,
     handle.core_handle().spawn(
         timeout.map_err(|_|()).and_then(move|_| {
             let rcx = handle2.get();
-            let _ac = JSAutoCompartment::new(rcx.cx, rcx.global.get());
+            let _ac = JSAutoRealm::new(rcx.cx, rcx.global.get());
 
             rooted!(in(rcx.cx) let this_val = rcx.global.get());
             rooted!(in(rcx.cx) let mut rval = UndefinedValue());
@@ -201,13 +214,13 @@ js_fn!{fn setTimeout(rcx: &RJSContext,
             unsafe {
                 let ok = JS_CallFunctionValue(
                     rcx.cx,
-                    this_val.handle(),
-                    callback.handle(),
+                    this_val.handle().into(),
+                    callback.handle().into(),
                     &jsapi::HandleValueArray {
                         elements_: ptr::null_mut(),
                         length_: 0,
                     },
-                    rval.handle_mut());
+                    rval.handle_mut().into());
 
                 if !ok {
                     println!("error!");
@@ -222,7 +235,7 @@ js_fn!{fn setTimeout(rcx: &RJSContext,
     Ok(())
 }}
 
-js_fn!{fn getFileSync(path: String) -> JSRet<Option<String>> {
+js_fn! {fn getFileSync(path: String) -> JSRet<Option<String>> {
     if let Ok(mut file) = File::open(path) {
         let mut contents = String::new();
         match file.read_to_string(&mut contents) {
@@ -234,7 +247,7 @@ js_fn!{fn getFileSync(path: String) -> JSRet<Option<String>> {
     }
 }}
 
-js_fn!{fn readDir(rcx: &RJSContext, path: String) -> JSRet<JSVal> {
+js_fn! {fn readDir(rcx: &RJSContext, path: String) -> JSRet<JSVal> {
     unsafe {
         rooted!(in(rcx.cx) let arr = JS_NewArrayObject1(rcx.cx, 0));
         rooted!(in(rcx.cx) let mut temp = UndefinedValue());
@@ -244,7 +257,7 @@ js_fn!{fn readDir(rcx: &RJSContext, path: String) -> JSRet<JSVal> {
             let path = entry.path();
 
             path.to_str().unwrap().to_jsval(rcx.cx, temp.handle_mut());
-            JS_SetElement(rcx.cx, arr.handle(), i as u32, temp.handle());
+            JS_SetElement(rcx.cx, arr.handle().into(), i as u32, temp.handle().into());
         }
 
         Ok(ObjectValue(*arr))
@@ -253,7 +266,7 @@ js_fn!{fn readDir(rcx: &RJSContext, path: String) -> JSRet<JSVal> {
 
 unsafe fn report_pending_exception(cx: *mut JSContext) {
     rooted!(in(cx) let mut ex = UndefinedValue());
-    if !jsapi::JS_GetPendingException(cx, ex.handle_mut()) {
+    if !jsapi::JS_GetPendingException(cx, ex.handle_mut().into()) {
         return;
     }
     jsapi::JS_ClearPendingException(cx);
@@ -267,7 +280,7 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
     let report = &*report;
 
     let filename = {
-        let filename = report.filename as *const u8;
+        let filename = report._base.filename as *const u8;
         if filename.is_null() {
             "<no filename>".to_string()
         } else {
@@ -278,10 +291,10 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
     };
 
     let message = {
-        let message = report.ucmessage;
+        let message = report._base.message_.data_ as *const u8;
         let length = (0..).find(|i| *message.offset(*i) == 0).unwrap();
         let message = ::std::slice::from_raw_parts(message, length as usize);
-        String::from_utf16_lossy(message)
+        String::from_utf8_lossy(message)
     };
 
     /*let line = {
@@ -294,31 +307,20 @@ unsafe fn report_pending_exception(cx: *mut JSContext) {
     //let ex = String::from_jsval(cx, ex.handle(), ()).to_result().unwrap();
     println!(
         "Exception at {}:{}:{}: {}",
-        filename, report.lineno, report.column, message
+        filename, report._base.lineno, report._base.column, message
     );
     //println!("{:?}", report);
-
-    rooted!(in(cx) let stack = jsapi::ExceptionStackOrNull(exhandle));
-    if stack.is_null() {
-        return;
-    }
-
-    rooted!(in(cx) let mut stackstr = jsapi::JS_GetEmptyStringValue(cx).to_string());
-
-    let success = jsapi::BuildStackString(cx, stack.handle(), stackstr.handle_mut(), 2);
-    if !success {
-        return;
-    }
-    rooted!(in(cx) let stackstr = jsval::StringValue(&*stackstr.get()));
-    let stackstr = String::from_jsval(cx, stackstr.handle(), ())
-        .to_result()
+    capture_stack!(in(cx) let stack);
+    let str_stack = stack
+        .unwrap()
+        .as_string(None, StackFormat::SpiderMonkey)
         .unwrap();
-    println!("{}", stackstr);
+    println!("{}", str_stack);
 }
 
 struct Test {}
 
-js_class!{ Test extends ()
+js_class! { Test extends ()
     [JSCLASS_HAS_PRIVATE]
 
     @constructor
@@ -349,26 +351,26 @@ struct Window {
 impl Window {
     fn do_on_thread<F>(&self, f: F)
     where
-        F: for<'r> FnBox(&'r glutin::GlWindow) + Send + 'static,
+        F: for<'r> FnOnce(&'r glutin::GlWindow) + Send + 'static,
     {
         let _ = self.send_msg.unbounded_send(WindowMsg::Do(Box::new(f)));
     }
 
     fn sync_do_on_thread<F, R>(&self, f: F) -> R
     where
-        F: for<'r> FnBox(&'r glutin::GlWindow) -> R + Send,
+        F: for<'r> FnOnce(&'r glutin::GlWindow) -> R + Send,
         R: Debug + Send + 'static,
     {
         // using transmute to force adding 'static, since this function is
         // enforcing a shorter lifetime
-        let fbox: Box<for<'r> FnBox(&'r glutin::GlWindow) -> R + Send> = Box::new(f);
-        let fbox: Box<for<'r> FnBox(&'r glutin::GlWindow) -> R + Send + 'static> =
+        let fbox: Box<for<'r> FnOnce(&'r glutin::GlWindow) -> R + Send> = Box::new(f);
+        let fbox: Box<for<'r> FnOnce(&'r glutin::GlWindow) -> R + Send + 'static> =
             unsafe { ::std::mem::transmute(fbox) };
 
         let (send, recv) = futures::sync::oneshot::channel();
 
         self.do_on_thread(move |win: &glutin::GlWindow| {
-            let out = fbox.call_box((win,));
+            let out = fbox(win);
             send.send(out).unwrap();
         });
 
@@ -508,7 +510,7 @@ impl<T: JSClassInitializer> FromJSValConvertible for Object<T> {
 
     unsafe fn from_jsval(
         cx: *mut JSContext,
-        value: HandleValue,
+        value: mozjs::rust::HandleValue,
         _: (),
     ) -> Result<ConversionResult<Object<T>>, ()> {
         use std::borrow::Cow;
@@ -550,7 +552,7 @@ pub struct WebGLShader {
     id: Arc<AtomicUsize>,
 }
 
-js_class!{ WebGLShader extends ()
+js_class! { WebGLShader extends ()
     [JSCLASS_HAS_PRIVATE]
     private: WebGLShader,
 
@@ -579,7 +581,7 @@ pub struct WebGLProgram {
     id: Arc<AtomicUsize>,
 }
 
-js_class!{ WebGLProgram extends ()
+js_class! { WebGLProgram extends ()
     [JSCLASS_HAS_PRIVATE]
     private: WebGLProgram,
 
@@ -608,7 +610,7 @@ pub struct WebGLBuffer {
     id: Arc<AtomicUsize>,
 }
 
-js_class!{ WebGLBuffer extends ()
+js_class! { WebGLBuffer extends ()
     [JSCLASS_HAS_PRIVATE]
     private: WebGLBuffer,
 
@@ -637,7 +639,7 @@ pub struct WebGLUniformLocation {
     loc: Arc<AtomicUsize>,
 }
 
-js_class!{ WebGLUniformLocation extends ()
+js_class! { WebGLUniformLocation extends ()
     [JSCLASS_HAS_PRIVATE]
     private: WebGLUniformLocation,
 
@@ -662,7 +664,7 @@ js_class!{ WebGLUniformLocation extends ()
     }
 }
 
-js_class!{ Window extends ()
+js_class! { Window extends ()
     [JSCLASS_HAS_PRIVATE]
     private: Window,
 
@@ -687,21 +689,21 @@ js_class!{ Window extends ()
                 recv_events.for_each(move |event| -> Result<(), ()> {
                     let rcx = handle2.get();
                     rooted!(in(rcx.cx) let jswin = handle2.retrieve_copy(&jswin).unwrap());
-                    let _ac = JSAutoCompartment::new(rcx.cx, jswin.get());
+                    let _ac = JSAutoRealm::new(rcx.cx, jswin.get());
                     rooted!(in(rcx.cx) let obj = unsafe { JS_NewPlainObject(rcx.cx) });
 
                     //println!("event received: {:?}", &event);
                     match event {
-                        WindowEvent::Glutin(ge) => glutin_event_to_js(rcx.cx, obj.handle(), ge),
+                        WindowEvent::Glutin(ge) => glutin_event_to_js(rcx.cx, obj.handle().into(), ge),
                         WindowEvent::Closed => { println!("WindowEvent closed"); },
                     }
 
                     rooted!(in(rcx.cx) let mut onevent = NullValue());
                     let success = unsafe {
                         JS_GetProperty(rcx.cx,
-                                       jswin.handle(),
+                                       jswin.handle().into(),
                                        c_str!("onevent"),
-                                       onevent.handle_mut())
+                                       onevent.handle_mut().into())
                     };
                     if !success || onevent.is_null_or_undefined() {
                         println!("success: {:?} onevent: {:?}", success, onevent.is_null());
@@ -714,9 +716,9 @@ js_class!{ Window extends ()
                     if ! unsafe {
                         jsapi::Call(rcx.cx,
                                     HandleValue::null(),
-                                    onevent.handle(),
+                                    onevent.handle().into(),
                                     &args,
-                                    ret.handle_mut())
+                                    ret.handle_mut().into())
                         } {
                         // ignore?
                         unsafe { report_pending_exception(rcx.cx); }
@@ -1223,7 +1225,7 @@ js_class!{ Window extends ()
 }
 
 enum WindowMsg {
-    Do(Box<FnBox(&glutin::GlWindow) + Send>),
+    Do(Box<FnOnce(&glutin::GlWindow) + Send>),
     Ping,
     Close,
 }
@@ -1291,7 +1293,7 @@ fn window_thread(
                 match msg {
                     WindowMsg::Do(func) => {
                         //println!("message Do");
-                        func.call_box((&stuff.gl_window,));
+                        func(&stuff.gl_window);
                     }
                     WindowMsg::Ping => {
                         println!("pong");
@@ -1331,7 +1333,7 @@ fn window_thread(
         events_loop.poll_events(|event| {
             match event {
                 glutin::Event::WindowEvent { ref event, .. } => match *event {
-                    glutin::WindowEvent::Closed => {
+                    glutin::WindowEvent::CloseRequested => {
                         stuff.stop();
                         stuff.gl_window.hide();
                         let _ = send_events.unbounded_send(WindowEvent::Closed);
@@ -1350,7 +1352,8 @@ fn window_thread(
         Timeout::new(Duration::from_millis(16), handle)
             .unwrap()
             .map(|_| Loop::Continue(()))
-    }).map_err(|_| ());
+    })
+    .map_err(|_| ());
 
     let streams = handle_window_events
         .select(recv_msgs)
