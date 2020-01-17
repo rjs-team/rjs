@@ -1,9 +1,6 @@
 version: 1.0.{build}
 image: Visual Studio 2017
 
-matrix:
-  fast_finish: true
-
 environment:
   PYTHON3: "C:\\Python37-x64\\python.exe"
   # The appveyor image we use has a pretty huge set of things installed... we make the
@@ -40,14 +37,6 @@ environment:
     - TARGET: i686-pc-windows-msvc
       CROSS_COMPILE: 1
     - TARGET: x86_64-pc-windows-msvc
-
-# Uncomment to enable RDP & wait for exit.  Connection info will be printed in the log.
-#init:
-#  - ps: iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
-#on_finish:
-#  - ps: $blockRdp = $true; iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
-
-# called after cloning, before building
 install:
   - set BUILD_ENV=msvc
   - ps: Start-FileDownload "http://servo-rust.s3.amazonaws.com/build/MozillaBuildSetup-2.2.0.exe"
@@ -62,9 +51,24 @@ install:
   - rustc -vV
   - cargo -vV
 
+shallow_clone: true
+
 build_script:
   - echo PATH %PATH%
   - echo MOZTOOLS_PATH %MOZTOOLS_PATH%
   - cd %APPVEYOR_BUILD_FOLDER%
   - cargo build --verbose --verbose --target %TARGET%
-  - if "%CROSS_COMPILE%" == "" cargo test --verbose --verbose --target %TARGET%
+
+test_script:
+  - cargo test --verbose --verbose --target %TARGET%
+  - cargo clippy
+  - cargo fmt -- --write-mode diff
+
+branches:
+  only:
+    - master
+    - /^v\d+\.\d+\.\d+.*$/
+
+cache:
+  - target
+  - C:\Users\appveyor\.cargo\registry
