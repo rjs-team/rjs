@@ -1,6 +1,6 @@
 name: Rust
 
-on: [push]
+on: [push, pull_request]
 
 jobs:
   build:
@@ -19,6 +19,18 @@ jobs:
       run: |
         export SHELL=/bin/bash
         cargo build --verbose
+    - name: Test
+      run: |
+        cargo test --verbose
+    - name: Clippy checks
+      uses: actions-rs/clippy-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        args: --all-features
+    - name: Format
+      run: |
+#        cargo clippy
+        cargo fmt -- --write-mode diff
     - name: Cache cargo registry
       uses: actions/cache@v1
       with:

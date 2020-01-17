@@ -34,9 +34,9 @@ environment:
   VCVARSALL_PATH: C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build
 
   matrix:
+    - TARGET: x86_64-pc-windows-msvc
     - TARGET: i686-pc-windows-msvc
       CROSS_COMPILE: 1
-    - TARGET: x86_64-pc-windows-msvc
 install:
   - set BUILD_ENV=msvc
   - ps: Start-FileDownload "http://servo-rust.s3.amazonaws.com/build/MozillaBuildSetup-2.2.0.exe"
@@ -61,8 +61,6 @@ build_script:
 
 test_script:
   - cargo test --verbose --verbose --target %TARGET%
-  - cargo clippy
-  - cargo fmt -- --write-mode diff
 
 branches:
   only:
