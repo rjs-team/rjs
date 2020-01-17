@@ -1,4 +1,8 @@
+version: 1.0.{build}
 image: Visual Studio 2017
+
+matrix:
+  fast_finish: true
 
 environment:
   PYTHON3: "C:\\Python37-x64\\python.exe"
@@ -30,14 +34,21 @@ environment:
   CXX: "clang-cl.exe"
   LINKER: "lld-link.exe"
 
+  VCVARSALL_PATH: C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build
+
   matrix:
     - TARGET: i686-pc-windows-msvc
       CROSS_COMPILE: 1
     - TARGET: x86_64-pc-windows-msvc
 
-  VCVARSALL_PATH: C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build
+# Uncomment to enable RDP & wait for exit.  Connection info will be printed in the log.
+#init:
+#  - ps: iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
+#on_finish:
+#  - ps: $blockRdp = $true; iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
 
-  install:
+# called after cloning, before building
+install:
   - set BUILD_ENV=msvc
   - ps: Start-FileDownload "http://servo-rust.s3.amazonaws.com/build/MozillaBuildSetup-2.2.0.exe"
   - ps: .\MozillaBuildSetup-2.2.0.exe /S | Out-Null
@@ -57,13 +68,3 @@ build_script:
   - cd %APPVEYOR_BUILD_FOLDER%
   - cargo build --verbose --verbose --target %TARGET%
   - if "%CROSS_COMPILE%" == "" cargo test --verbose --verbose --target %TARGET%
-shallow_clone: true
-
-branches:
-  only:
-    - master
-    - /^v\d+\.\d+\.\d+.*$/
-
-cache:
-  - target
-  - C:\Users\appveyor\.cargo\registry
