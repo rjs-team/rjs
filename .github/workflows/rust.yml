@@ -29,7 +29,6 @@ jobs:
         args: --all-features
     - name: Format
       run: |
-#        cargo clippy
         cargo fmt -- --write-mode diff
     - name: Cache cargo registry
       uses: actions/cache@v1
