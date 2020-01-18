@@ -1,25 +1,27 @@
 extern crate futures;
 extern crate tokio_core;
 
-use tokio_core::reactor as tokio;
-use futures::Future;
 use futures::future;
-use futures::Stream;
-use futures::sync::oneshot;
 use futures::sync::mpsc;
+use futures::sync::oneshot;
+use futures::Future;
+use futures::Stream;
+use tokio_core::reactor as tokio;
 
-use std::sync::{Arc, Weak};
-use std::rc;
-use std::rc::Rc;
-use std::clone::Clone;
-use std::marker::PhantomData;
+use downcast::Any;
+use mozjs::jsapi::{
+    GCReason, Heap, JSGCInvocationKind, JSTracer, JS_AddExtraGCRootsTracer,
+    JS_RemoveExtraGCRootsTracer, NonIncrementalGC,
+};
+use mozjs::rust::{GCMethods, Runtime, Trace};
 use slab::Slab;
 use std::cell::RefCell;
+use std::clone::Clone;
 use std::fmt::Debug;
-use downcast::Any;
-use mozjs::rust::{GCMethods, Runtime, Trace};
-use mozjs::jsapi::{GCReason, Heap, JSGCInvocationKind, JSTracer, JS_AddExtraGCRootsTracer,
-                   JS_RemoveExtraGCRootsTracer, NonIncrementalGC};
+use std::marker::PhantomData;
+use std::rc;
+use std::rc::Rc;
+use std::sync::{Arc, Weak};
 
 use std::os::raw::c_void;
 
@@ -103,9 +105,13 @@ where
                 data: Rc::clone(&data),
                 slab: Rc::downgrade(&slab),
             };
-            unsafe { NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON) };
+            unsafe {
+                NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON)
+            };
             f(handle);
-            unsafe { NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON) };
+            unsafe {
+                NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON)
+            };
             Ok(())
         })
     }));

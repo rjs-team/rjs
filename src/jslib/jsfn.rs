@@ -1,9 +1,9 @@
+use mozjs::conversions::ToJSValConvertible;
+use mozjs::jsapi::HandleObject;
 use mozjs::jsapi::JSContext;
 use mozjs::jsapi::JSFunction;
 use mozjs::jsapi::JS_DefineFunction;
 use mozjs::jsapi::Value;
-use mozjs::jsapi::HandleObject;
-use mozjs::conversions::ToJSValConvertible;
 
 use std::ffi::CStr;
 

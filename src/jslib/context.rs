@@ -1,13 +1,15 @@
 use crate::jslib::eventloop;
-use mozjs::jsapi::{HandleObject, JSContext, JSObject, JS_GetCompartmentPrivate,
-                   JS_SetCompartmentPrivate, GetRealmPrivate, SetRealmPrivate};
 use mozjs::jsapi::GetCurrentRealmOrNull;
+use mozjs::jsapi::{
+    GetRealmPrivate, HandleObject, JSContext, JSObject, JS_GetCompartmentPrivate,
+    JS_SetCompartmentPrivate, SetRealmPrivate,
+};
 
-use std::collections::HashMap;
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::os::raw::c_void;
-use std::sync::RwLock;
 use std::ptr;
+use std::sync::RwLock;
 
 pub struct RJSContext {
     pub cx: *mut JSContext,
