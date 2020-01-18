@@ -22,13 +22,10 @@ jobs:
     - name: Test
       run: |
         cargo test --verbose
-    - name: Clippy checks
-      uses: actions-rs/clippy-check@v1
-      with:
-        token: ${{ secrets.GITHUB_API_TOKEN }}
-    - name: Format
+    - name: Format and lint
       run: |
         cargo fmt -- --write-mode diff
+        cargo clippy
     - name: Cache cargo registry
       uses: actions/cache@v1
       with:
