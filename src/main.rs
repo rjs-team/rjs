@@ -417,7 +417,7 @@ fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Even
                     setprop!(in(cx, val) (obj).x = x);
                     setprop!(in(cx, val) (obj).y = y);
                 }
-                _Closed => {
+                CloseRequested => {
                     setprop!(in(cx, val) (obj).type = "closed");
                 }
                 ReceivedCharacter(c) => {
