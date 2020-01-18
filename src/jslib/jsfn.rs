@@ -1,4 +1,3 @@
-
 use mozjs::jsapi::HandleObject;
 use mozjs::jsapi::JSContext;
 use mozjs::jsapi::JSFunction;

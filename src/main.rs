@@ -62,7 +62,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::sync::{Once};
+use std::sync::Once;
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio_core::reactor::{Core, Timeout};
