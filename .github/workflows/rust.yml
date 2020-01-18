@@ -25,10 +25,9 @@ jobs:
     - name: Test
       run: |
         cargo test --verbose
-    - name: Format and lint
+    - name: Format
       run: |
         cargo fmt -- --check
-        cargo clippy
     - name: Cache cargo registry
       uses: actions/cache@v1
       with:
