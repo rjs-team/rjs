@@ -1,4 +1,4 @@
-use mozjs::conversions::ToJSValConvertible;
+
 use mozjs::jsapi::HandleObject;
 use mozjs::jsapi::JSContext;
 use mozjs::jsapi::JSFunction;
@@ -7,7 +7,7 @@ use mozjs::jsapi::Value;
 
 use std::ffi::CStr;
 
-pub type JSRet<T: ToJSValConvertible> = Result<T, Option<String>>;
+pub type JSRet<T> = Result<T, Option<String>>;
 
 pub type RJSNativeRaw = unsafe extern "C" fn(*mut JSContext, u32, *mut Value) -> bool;
 
@@ -130,7 +130,6 @@ macro_rules! js_unpack_args {
         js_unpack_args!({$fn, $rcx, $remote, $callargs} ($($args)*));
     };
     ({$fn:expr, $rcx:expr, $remote:expr, $callargs:expr} ($($args:tt)*)) => {
-        #[cfg_attr(feature = "cargo-clippy", allow(useless_attribute))]
         #[allow(unused)]
         use mozjs::conversions::FromJSValConvertible;
 

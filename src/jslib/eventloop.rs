@@ -17,7 +17,7 @@ use mozjs::rust::{GCMethods, Runtime, Trace};
 use slab::Slab;
 use std::cell::RefCell;
 use std::clone::Clone;
-use std::fmt::Debug;
+
 use std::marker::PhantomData;
 use std::rc;
 use std::rc::Rc;
@@ -26,13 +26,13 @@ use std::sync::{Arc, Weak};
 use std::os::raw::c_void;
 
 //type EventLoopFn<T> = for<'t> Fn(&'t T, Handle<T>);
-type Message<T> = (Remote<T>, Box<FnOnce(Handle<T>) -> ()>);
+type Message<T> = (Remote<T>, Box<dyn FnOnce(Handle<T>) -> ()>);
 
 type RefSlab = RefCell<Slab<RefSlabEl>>;
-type RefSlabEl = RefCell<Option<Box<Traceable>>>;
+type RefSlabEl = RefCell<Option<Box<dyn Traceable>>>;
 
 trait Traceable: Any {
-    fn get_trace(&self) -> &Trace;
+    fn get_trace(&self) -> &dyn Trace;
 }
 
 unsafe impl Trace for dyn Traceable {
@@ -42,11 +42,11 @@ unsafe impl Trace for dyn Traceable {
 }
 
 impl<T: Trace + 'static> Traceable for T {
-    fn get_trace(&self) -> &Trace {
+    fn get_trace(&self) -> &dyn Trace {
         self
     }
 }
-downcast!(Traceable);
+downcast!(dyn Traceable);
 
 unsafe extern "C" fn ref_slab_tracer(trc: *mut JSTracer, data: *mut c_void) {
     if data.is_null() {
@@ -263,7 +263,7 @@ impl<T> Remote<T> {
         F: FnOnce(Handle<T>) + Send + 'static,
     {
         let me: Remote<T> = (*self).clone();
-        let myfunc: Box<FnOnce(Handle<T>) -> () + 'static> = Box::new(f);
+        let myfunc: Box<dyn FnOnce(Handle<T>) -> () + 'static> = Box::new(f);
         //let myfunc: Box<FnOnce<T>> = Box::new( |a, b| f(a, b) );
         let fb = (me, myfunc);
         (*self.0).unbounded_send(fb).unwrap()

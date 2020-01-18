@@ -51,7 +51,7 @@ use jslib::jsclass::{
     null_function, null_property, null_wrapper, JSClassInitializer, JSCLASS_HAS_PRIVATE,
 };
 use jslib::jsfn::{JSRet, RJSFn};
-use std::boxed;
+
 use std::env;
 use std::ffi::CString;
 use std::fmt::Debug;
@@ -62,7 +62,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::sync::{Once, ONCE_INIT};
+use std::sync::{Once};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio_core::reactor::{Core, Timeout};
@@ -363,8 +363,8 @@ impl Window {
     {
         // using transmute to force adding 'static, since this function is
         // enforcing a shorter lifetime
-        let fbox: Box<for<'r> FnOnce(&'r glutin::GlWindow) -> R + Send> = Box::new(f);
-        let fbox: Box<for<'r> FnOnce(&'r glutin::GlWindow) -> R + Send + 'static> =
+        let fbox: Box<dyn for<'r> FnOnce(&'r glutin::GlWindow) -> R + Send> = Box::new(f);
+        let fbox: Box<dyn for<'r> FnOnce(&'r glutin::GlWindow) -> R + Send + 'static> =
             unsafe { ::std::mem::transmute(fbox) };
 
         let (send, recv) = futures::sync::oneshot::channel();
@@ -417,7 +417,7 @@ fn glutin_event_to_js(cx: *mut JSContext, obj: HandleObject, event: glutin::Even
                     setprop!(in(cx, val) (obj).x = x);
                     setprop!(in(cx, val) (obj).y = y);
                 }
-                Closed => {
+                _Closed => {
                     setprop!(in(cx, val) (obj).type = "closed");
                 }
                 ReceivedCharacter(c) => {
@@ -1119,9 +1119,9 @@ js_class! { Window extends ()
                 });
         };
 
-        if let Ok(mut buf) = buf {
+        if let Ok(buf) = buf {
             do_it(unsafe { buf.as_slice() })
-        } else if let Ok(mut view) = view {
+        } else if let Ok(view) = view {
             do_it(unsafe { view.as_slice() })
         } else {
             panic!("Not ArrayBuffer or ArrayBufferView");
@@ -1141,7 +1141,7 @@ js_class! { Window extends ()
 
         // Since this should always be given 16 element arrays, just always copy them
 
-        let data = if let Ok(mut view) = view {
+        let data = if let Ok(view) = view {
             unsafe { view.as_slice().to_vec() }
         } else {
             rooted!(in(rcx.cx) let value = ObjectValue(value));
@@ -1225,7 +1225,7 @@ js_class! { Window extends ()
 }
 
 enum WindowMsg {
-    Do(Box<FnOnce(&glutin::GlWindow) + Send>),
+    Do(Box<dyn FnOnce(&glutin::GlWindow) + Send>),
     Ping,
     Close,
 }

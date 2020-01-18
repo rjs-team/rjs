@@ -1,8 +1,7 @@
 use crate::jslib::eventloop;
 use mozjs::jsapi::GetCurrentRealmOrNull;
 use mozjs::jsapi::{
-    GetRealmPrivate, HandleObject, JSContext, JSObject, JS_GetCompartmentPrivate,
-    JS_SetCompartmentPrivate, SetRealmPrivate,
+    GetRealmPrivate, HandleObject, JSContext, JSObject, SetRealmPrivate,
 };
 
 use std::any::TypeId;

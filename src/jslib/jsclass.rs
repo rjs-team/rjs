@@ -11,7 +11,7 @@ use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
 use std::ptr;
 
 pub const JSCLASS_HAS_PRIVATE: c_uint = 1;
-use mozjs::jsapi::JSPropertySpec__bindgen_ty_1;
+
 pub const fn jsclass_has_reserved_slots(n: c_uint) -> c_uint {
     (n & JSCLASS_RESERVED_SLOTS_MASK) << JSCLASS_RESERVED_SLOTS_SHIFT
 }
@@ -104,7 +104,7 @@ pub trait JSClassInitializer {
     fn static_properties() -> *const JSPropertySpec {
         ptr::null()
     }
-    fn constr() -> Option<Box<RJSFn>> {
+    fn constr() -> Option<Box<dyn RJSFn>> {
         None
     }
 
@@ -157,7 +157,7 @@ macro_rules! compute_once {
     ($type:ty = $static:expr ; $body:tt) => {
         unsafe {
             static mut VAL: $type = $static;
-            static ONCE: Once = ONCE_INIT;
+            static ONCE: Once = Once::new();
 
             ONCE.call_once(|| {
                 VAL = $body;
@@ -222,7 +222,7 @@ impl JSClassInitializer for $name {
         <$parent>::class_info(rcx)
     }
 
-    fn constr() -> Option<Box<RJSFn>> {
+    fn constr() -> Option<Box<dyn RJSFn>> {
 
         $(
             __jsclass_constrspec!{$constr}
