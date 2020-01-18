@@ -85,7 +85,7 @@ where
 
     let remote = Remote(tx);
     let handle = Handle {
-        remote: remote,
+        remote,
         thandle: core_handle.clone(),
         data: Rc::clone(&data),
         slab: Rc::downgrade(&slab),
@@ -100,7 +100,7 @@ where
         rx.for_each(|tuple| -> Result<(), ()> {
             let (remote, f) = tuple;
             let handle = Handle {
-                remote: remote,
+                remote,
                 thandle: core_handle.clone(),
                 data: Rc::clone(&data),
                 slab: Rc::downgrade(&slab),
@@ -188,7 +188,7 @@ impl<T> Handle<T> {
 
         RemoteRef {
             tx: Arc::new(tx),
-            key: key,
+            key,
             marker: PhantomData,
         }
     }
@@ -234,7 +234,7 @@ impl<T> WeakHandle<T> {
             data.map(|data| Handle {
                 remote: Remote(remote),
                 thandle: self.thandle.clone(),
-                data: data,
+                data,
                 slab: rc::Weak::clone(&self.slab),
             })
         })

@@ -11,6 +11,7 @@ pub fn try_cast<T: ?Sized + 'static>(c: &dyn Castable) -> Option<&T> {
     v
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub trait Castable {
     unsafe fn unsafe_try_cast(&self, to: TypeId, out: *mut Option<()>);
 }

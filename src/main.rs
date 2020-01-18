@@ -151,8 +151,8 @@ fn main() {
         );
 
         rooted!(in(cx) let mut rval = UndefinedValue());
-        let res = rt.evaluate_script(global.into(), &contents, &filename, 1, rval.handle_mut());
-        if !res.is_ok() {
+        let res = rt.evaluate_script(global, &contents, &filename, 1, rval.handle_mut());
+        if res.is_err() {
             unsafe {
                 report_pending_exception(cx);
             }
@@ -542,7 +542,7 @@ impl<T: JSClassInitializer> FromJSValConvertible for Object<T> {
         }
 
         Ok(ConversionResult::Success(Object {
-            obj: obj,
+            obj,
             marker: PhantomData,
         }))
     }
@@ -1281,7 +1281,7 @@ fn window_thread(
     }
 
     let stuff = Rc::new(RefCell::new(WindowStuff {
-        gl_window: gl_window,
+        gl_window,
         stop: Some(stop_send),
     }));
 
@@ -1324,7 +1324,7 @@ fn window_thread(
         let now = Instant::now();
         stuff.gl_window.swap_buffers().unwrap();
         let swap_time = now.elapsed();
-        let swap_ms = swap_time.subsec_nanos() as f32 / 1000000.0;
+        let swap_ms = swap_time.subsec_nanos() as f32 / 1_000_000.0;
         if swap_ms > 1.0 {
             println!("swap took: {}ms", swap_ms);
         }

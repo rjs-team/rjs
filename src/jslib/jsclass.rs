@@ -1,3 +1,4 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 use crate::jslib::context;
 use crate::jslib::context::{ClassInfo, RJSContext};
 use crate::jslib::jsfn::RJSFn;
@@ -46,7 +47,7 @@ impl GetJSClassInfo for () {
 
 pub trait JSClassInitializer {
     type Private;
-
+    #[allow(clippy::missing_safety_doc)]
     unsafe fn init_class(rcx: &RJSContext, obj: HandleObject) -> context::ClassInfo
     where
         Self: Sized + 'static,
@@ -80,7 +81,7 @@ pub trait JSClassInitializer {
         let constr = JS_GetConstructor(rcx.cx, proto.handle().into());
 
         let classinfo = context::ClassInfo {
-            constr: constr,
+            constr,
             prototype: proto.get(),
         };
 
@@ -134,7 +135,7 @@ pub trait JSClassInitializer {
     {
         let info = rcx
             .get_classinfo_for::<Self>()
-            .expect(&format!("{} must be defined in this compartment!", "?"));
+            .unwrap_or_else(|| panic!("{} must be defined in this compartment!", "?"));
 
         let jsobj = unsafe {
             ::mozjs::jsapi::JS_NewObjectWithGivenProto(

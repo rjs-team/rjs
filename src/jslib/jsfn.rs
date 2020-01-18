@@ -14,7 +14,7 @@ pub trait RJSFn {
     fn func(&self) -> RJSNativeRaw;
     fn name(&self) -> &'static CStr;
     fn nargs(&self) -> u32;
-
+    #[allow(clippy::missing_safety_doc)]
     unsafe fn define_on(
         &self,
         cx: *mut JSContext,
@@ -129,7 +129,7 @@ macro_rules! js_unpack_args {
         js_unpack_args!({$fn, $rcx, $remote, $callargs} ($($args)*));
     };
     ({$fn:expr, $rcx:expr, $remote:expr, $callargs:expr} ($($args:tt)*)) => {
-        #[allow(unused)]
+        #[allow(unused_imports)]
         use mozjs::conversions::FromJSValConvertible;
 
         if $callargs.argc_ != _js_unpack_args_count!($($args)*,) {
