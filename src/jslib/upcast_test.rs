@@ -26,16 +26,16 @@ impl B for S {
     }
 }
 
-impl_castable!(S: A, B);
+impl_castable!(S: dyn A, dyn B);
 
 #[test]
 fn test_castable() {
     let s = S {};
 
-    let c: &Castable = &s;
+    let c: &dyn Castable = &s;
 
-    assert_eq!(Some(1), try_cast::<A>(c).map(|a: &A| a.a()));
-    assert_eq!(Some(2), try_cast::<B>(c).map(|b: &B| b.b()));
+    assert_eq!(Some(1), try_cast::<dyn A>(c).map(|a: &dyn A| a.a()));
+    assert_eq!(Some(2), try_cast::<dyn B>(c).map(|b: &dyn B| b.b()));
     assert_eq!(Some(3), try_cast::<S>(c).map(|s: &S| s.s()));
     assert_eq!(None, try_cast::<Option<u32>>(c));
     assert_eq!(None, try_cast::<()>(c));
@@ -43,10 +43,10 @@ fn test_castable() {
 
 #[test]
 fn test_castable_box() {
-    let c: Box<Castable> = Box::new(S);
+    let c: Box<dyn Castable> = Box::new(S);
 
-    assert_eq!(Some(1), try_cast::<A>(&*c).map(|a: &A| a.a()));
-    assert_eq!(Some(2), try_cast::<B>(&*c).map(|b: &B| b.b()));
+    assert_eq!(Some(1), try_cast::<dyn A>(&*c).map(|a: &dyn A| a.a()));
+    assert_eq!(Some(2), try_cast::<dyn B>(&*c).map(|b: &dyn B| b.b()));
     assert_eq!(Some(3), try_cast::<S>(&*c).map(|s: &S| s.s()));
     assert_eq!(None, try_cast::<Option<u32>>(&*c));
     assert_eq!(None, try_cast::<()>(&*c));

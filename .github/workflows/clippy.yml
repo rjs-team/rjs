@@ -1,4 +1,4 @@
-name: Rust
+name: Clippy 
 
 on: [push, pull_request]
 
@@ -22,12 +22,10 @@ jobs:
       run: |
         export SHELL=/bin/bash
         cargo build --verbose
-    - name: Test
-      run: |
-        cargo test --verbose
-    - name: Format
-      run: |
-        cargo fmt -- --check
+    - name: Clippy check
+      uses: actions-rs/clippy-check@annotations-fallback
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
     - name: Cache cargo registry
       uses: actions/cache@v1
       with:

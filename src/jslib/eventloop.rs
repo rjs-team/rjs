@@ -1,36 +1,38 @@
 extern crate futures;
 extern crate tokio_core;
 
-use tokio_core::reactor as tokio;
-use futures::Future;
 use futures::future;
-use futures::Stream;
-use futures::sync::oneshot;
 use futures::sync::mpsc;
+use futures::sync::oneshot;
+use futures::Future;
+use futures::Stream;
+use tokio_core::reactor as tokio;
 
-use std::sync::{Arc, Weak};
-use std::rc;
-use std::rc::Rc;
-use std::clone::Clone;
-use std::marker::PhantomData;
+use downcast::Any;
+use mozjs::jsapi::{
+    GCReason, Heap, JSGCInvocationKind, JSTracer, JS_AddExtraGCRootsTracer,
+    JS_RemoveExtraGCRootsTracer, NonIncrementalGC,
+};
+use mozjs::rust::{GCMethods, Runtime, Trace};
 use slab::Slab;
 use std::cell::RefCell;
-use std::fmt::Debug;
-use downcast::Any;
-use mozjs::rust::{GCMethods, Runtime, Trace};
-use mozjs::jsapi::{GCReason, Heap, JSGCInvocationKind, JSTracer, JS_AddExtraGCRootsTracer,
-                   JS_RemoveExtraGCRootsTracer, NonIncrementalGC};
+use std::clone::Clone;
+
+use std::marker::PhantomData;
+use std::rc;
+use std::rc::Rc;
+use std::sync::{Arc, Weak};
 
 use std::os::raw::c_void;
 
 //type EventLoopFn<T> = for<'t> Fn(&'t T, Handle<T>);
-type Message<T> = (Remote<T>, Box<FnOnce(Handle<T>) -> ()>);
+type Message<T> = (Remote<T>, Box<dyn FnOnce(Handle<T>) -> ()>);
 
 type RefSlab = RefCell<Slab<RefSlabEl>>;
-type RefSlabEl = RefCell<Option<Box<Traceable>>>;
+type RefSlabEl = RefCell<Option<Box<dyn Traceable>>>;
 
 trait Traceable: Any {
-    fn get_trace(&self) -> &Trace;
+    fn get_trace(&self) -> &dyn Trace;
 }
 
 unsafe impl Trace for dyn Traceable {
@@ -40,11 +42,11 @@ unsafe impl Trace for dyn Traceable {
 }
 
 impl<T: Trace + 'static> Traceable for T {
-    fn get_trace(&self) -> &Trace {
+    fn get_trace(&self) -> &dyn Trace {
         self
     }
 }
-downcast!(Traceable);
+downcast!(dyn Traceable);
 
 unsafe extern "C" fn ref_slab_tracer(trc: *mut JSTracer, data: *mut c_void) {
     if data.is_null() {
@@ -83,7 +85,7 @@ where
 
     let remote = Remote(tx);
     let handle = Handle {
-        remote: remote,
+        remote,
         thandle: core_handle.clone(),
         data: Rc::clone(&data),
         slab: Rc::downgrade(&slab),
@@ -98,14 +100,18 @@ where
         rx.for_each(|tuple| -> Result<(), ()> {
             let (remote, f) = tuple;
             let handle = Handle {
-                remote: remote,
+                remote,
                 thandle: core_handle.clone(),
                 data: Rc::clone(&data),
                 slab: Rc::downgrade(&slab),
             };
-            unsafe { NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON) };
+            unsafe {
+                NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON)
+            };
             f(handle);
-            unsafe { NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON) };
+            unsafe {
+                NonIncrementalGC(rt.cx(), JSGCInvocationKind::GC_SHRINK, GCReason::NO_REASON)
+            };
             Ok(())
         })
     }));
@@ -182,7 +188,7 @@ impl<T> Handle<T> {
 
         RemoteRef {
             tx: Arc::new(tx),
-            key: key,
+            key,
             marker: PhantomData,
         }
     }
@@ -228,7 +234,7 @@ impl<T> WeakHandle<T> {
             data.map(|data| Handle {
                 remote: Remote(remote),
                 thandle: self.thandle.clone(),
-                data: data,
+                data,
                 slab: rc::Weak::clone(&self.slab),
             })
         })
@@ -257,7 +263,7 @@ impl<T> Remote<T> {
         F: FnOnce(Handle<T>) + Send + 'static,
     {
         let me: Remote<T> = (*self).clone();
-        let myfunc: Box<FnOnce(Handle<T>) -> () + 'static> = Box::new(f);
+        let myfunc: Box<dyn FnOnce(Handle<T>) -> () + 'static> = Box::new(f);
         //let myfunc: Box<FnOnce<T>> = Box::new( |a, b| f(a, b) );
         let fb = (me, myfunc);
         (*self.0).unbounded_send(fb).unwrap()

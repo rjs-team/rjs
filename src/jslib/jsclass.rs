@@ -1,3 +1,4 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 use crate::jslib::context;
 use crate::jslib::context::{ClassInfo, RJSContext};
 use crate::jslib::jsfn::RJSFn;
@@ -11,7 +12,7 @@ use mozjs::JSCLASS_RESERVED_SLOTS_MASK;
 use std::ptr;
 
 pub const JSCLASS_HAS_PRIVATE: c_uint = 1;
-use mozjs::jsapi::JSPropertySpec__bindgen_ty_1;
+
 pub const fn jsclass_has_reserved_slots(n: c_uint) -> c_uint {
     (n & JSCLASS_RESERVED_SLOTS_MASK) << JSCLASS_RESERVED_SLOTS_SHIFT
 }
@@ -46,7 +47,7 @@ impl GetJSClassInfo for () {
 
 pub trait JSClassInitializer {
     type Private;
-
+    #[allow(clippy::missing_safety_doc)]
     unsafe fn init_class(rcx: &RJSContext, obj: HandleObject) -> context::ClassInfo
     where
         Self: Sized + 'static,
@@ -80,7 +81,7 @@ pub trait JSClassInitializer {
         let constr = JS_GetConstructor(rcx.cx, proto.handle().into());
 
         let classinfo = context::ClassInfo {
-            constr: constr,
+            constr,
             prototype: proto.get(),
         };
 
@@ -104,7 +105,7 @@ pub trait JSClassInitializer {
     fn static_properties() -> *const JSPropertySpec {
         ptr::null()
     }
-    fn constr() -> Option<Box<RJSFn>> {
+    fn constr() -> Option<Box<dyn RJSFn>> {
         None
     }
 
@@ -134,7 +135,7 @@ pub trait JSClassInitializer {
     {
         let info = rcx
             .get_classinfo_for::<Self>()
-            .expect(&format!("{} must be defined in this compartment!", "?"));
+            .unwrap_or_else(|| panic!("{} must be defined in this compartment!", "?"));
 
         let jsobj = unsafe {
             ::mozjs::jsapi::JS_NewObjectWithGivenProto(
@@ -157,7 +158,7 @@ macro_rules! compute_once {
     ($type:ty = $static:expr ; $body:tt) => {
         unsafe {
             static mut VAL: $type = $static;
-            static ONCE: Once = ONCE_INIT;
+            static ONCE: Once = Once::new();
 
             ONCE.call_once(|| {
                 VAL = $body;
@@ -222,7 +223,7 @@ impl JSClassInitializer for $name {
         <$parent>::class_info(rcx)
     }
 
-    fn constr() -> Option<Box<RJSFn>> {
+    fn constr() -> Option<Box<dyn RJSFn>> {
 
         $(
             __jsclass_constrspec!{$constr}

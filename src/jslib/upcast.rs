@@ -3,7 +3,7 @@
 
 use std::any::TypeId;
 
-pub fn try_cast<T: ?Sized + 'static>(c: &Castable) -> Option<&T> {
+pub fn try_cast<T: ?Sized + 'static>(c: &dyn Castable) -> Option<&T> {
     let mut v: Option<&T> = None;
 
     unsafe { c.unsafe_try_cast(TypeId::of::<T>(), &mut v as *mut Option<&T> as *mut _) }
@@ -11,6 +11,7 @@ pub fn try_cast<T: ?Sized + 'static>(c: &Castable) -> Option<&T> {
     v
 }
 
+#[allow(clippy::missing_safety_doc)]
 pub trait Castable {
     unsafe fn unsafe_try_cast(&self, to: TypeId, out: *mut Option<()>);
 }

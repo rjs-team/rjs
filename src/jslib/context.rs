@@ -1,13 +1,13 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 use crate::jslib::eventloop;
-use mozjs::jsapi::{HandleObject, JSContext, JSObject, JS_GetCompartmentPrivate,
-                   JS_SetCompartmentPrivate, GetRealmPrivate, SetRealmPrivate};
 use mozjs::jsapi::GetCurrentRealmOrNull;
+use mozjs::jsapi::{GetRealmPrivate, HandleObject, JSContext, JSObject, SetRealmPrivate};
 
-use std::collections::HashMap;
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::os::raw::c_void;
-use std::sync::RwLock;
 use std::ptr;
+use std::sync::RwLock;
 
 pub struct RJSContext {
     pub cx: *mut JSContext,
@@ -24,8 +24,8 @@ pub struct ClassInfo {
 impl RJSContext {
     pub fn new(cx: *mut JSContext, global: HandleObject) -> RJSContext {
         RJSContext {
-            cx: cx,
-            global: global,
+            cx,
+            global,
             cls_protos: RwLock::new(HashMap::new()),
         }
     }
@@ -35,9 +35,8 @@ impl RJSContext {
             .read()
             .unwrap()
             .get(&TypeId::of::<T>())
-            .map(|c| *c)
+            .copied()
     }
-
     pub fn set_classinfo_for<T: 'static>(&self, ci: ClassInfo) {
         self.cls_protos
             .write()
