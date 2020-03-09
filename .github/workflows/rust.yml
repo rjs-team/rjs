@@ -1,6 +1,11 @@
 name: Rust
 
-on: [push, pull_request]
+on: 
+  push:
+  pull_request:
+  schedule:
+    # 14:05 friday
+    - cron:  '5 14 * * 5'
 
 jobs:
   build:
@@ -16,6 +21,7 @@ jobs:
     - name: Prepare
       run: |
         sudo apt update
+        sudo apt install llvm -y
         wget -q https://hg.mozilla.org/mozilla-central/raw-file/default/python/mozboot/bin/bootstrap.py -O bootstrap.py
         python bootstrap.py --application-choice=browser --no-interactive|| exit 0
     - name: Build

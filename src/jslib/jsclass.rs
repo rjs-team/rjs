@@ -207,7 +207,9 @@ impl JSClassInitializer for $name {
                     name: c_str!(stringify!($name)),
                     flags: $flags,
                     cOps: __jsclass_ops!([] $($ops)*),
-                    reserved: [ptr::null_mut() as *mut _; 3],
+                    spec: ptr::null(),
+                    ext: ptr::null(),
+                    oOps: ptr::null(),
                 }))
             }
         }
@@ -411,7 +413,7 @@ macro_rules! __jsclass_functionspec {
             JSFunctionSpec {
                 //name: b"log\0" as *const u8 as *const c_char,
                 //name: CString::new(stringify!($name)).unwrap().into_raw(),
-                name: concat!(stringify!($name), "\0").as_ptr() as *const ::std::os::raw::c_char,
+                name: mozjs::jsapi::JSPropertySpec_Name { string_:concat!(stringify!($name), "\0").as_ptr() as *const ::std::os::raw::c_char},
                 selfHostedName: ptr::null(),
                 flags: JSPROP_ENUMERATE as u16,
                 nargs: $name{}.nargs() as u16,
@@ -461,16 +463,16 @@ macro_rules! __jsclass_propertyspec {
             JSPropertySpec {
                 //name: b"window\0" as *const u8 as *const c_char,
                 //name: CString::new(stringify!($name)).unwrap().into_raw(),
-                name: concat!(stringify!($name), "\0").as_ptr()
-                    as *const ::std::os::raw::c_char,
+                name: mozjs::jsapi::JSPropertySpec_Name { string_:concat!(stringify!($name), "\0").as_ptr()
+                    as *const ::std::os::raw::c_char},
                 flags: (JSPROP_ENUMERATE) as u8,
-                __bindgen_anon_1: mozjs::jsapi::JSPropertySpec__bindgen_ty_1 {
-                    accessors: mozjs::jsapi::JSPropertySpec__bindgen_ty_1__bindgen_ty_1 {
-                        getter: mozjs::jsapi::JSPropertySpec__bindgen_ty_1__bindgen_ty_1__bindgen_ty_1 {
+                u: mozjs::jsapi::JSPropertySpec_AccessorsOrValue {
+                    accessors: mozjs::jsapi::JSPropertySpec_AccessorsOrValue_Accessors {
+                        getter: mozjs::jsapi::JSPropertySpec_Accessor {
                             //native: JSNativeWrapper { op: Some(h), info: ptr::null() },
                             native: $getter,
                         },
-                        setter: mozjs::jsapi::JSPropertySpec__bindgen_ty_1__bindgen_ty_1__bindgen_ty_2 {
+                        setter: mozjs::jsapi::JSPropertySpec_Accessor {
                             //native: JSNativeWrapper { op: None, info: ptr::null() },
                             native: $setter,
                         }
